@@ -1,0 +1,4 @@
+candle_index,datetime,programmatic_label,human_label,annotator_note
+42,2020-03-15 10:30:00-05:00,1,1,
+108,2020-06-22 14:30:00-04:00,-1,-1,small gap but convincing
+317,2021-01-04 09:30:00-05:00,0,0,no clear FVG visible
