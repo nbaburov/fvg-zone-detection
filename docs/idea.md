@@ -57,14 +57,15 @@ Pipeline:
 
 ---
 
-## Model Stages
+## Model Stages (revised per R6, 8 May 2026)
 
 | Stage | Architecture | Notes |
 |---|---|---|
-| 1 | LSTM (2-layer stacked, 64 units, dropout) | Sequential baseline |
-| 2 | CNN-LSTM (1D conv kernel 3–5 + LSTM) | FVGs are 3-candle local formations → conv front-end well-motivated |
-| 3 | **xLSTM** (see below) | Feedback from AI teacher — must explore |
-| 4 | Transformer (time-permitting) | Lightweight encoder, multi-head self-attention. TFT candidate for multi-timeframe |
+| 0 | **XGBoost baseline (NEW)** | Boring control. Effective sample size ~117 (stride=1 = 60× overlap) → small-data regime likely favors gradient boosting. Mandatory academic control. |
+| 1 | LSTM (2-layer stacked, 64 units, dropout) | Sequential DL baseline |
+| 2 | **CNN-LSTM (1D conv kernel 3–5 + LSTM)** — expected best DL | FVGs are 3-candle local formations → conv front-end directly encodes the pattern's locality |
+| 3 | **xLSTM** (see below) | Teacher feedback — explore. 2025 MDPI study found it *worse* than vanilla LSTM on short-term financial forecasting; included for academic completeness, don't expect it to win |
+| 4 | Transformer (lightweight, time-permitting) | Tiny only — small-data regime risks overfit. Skippable. |
 
 ### xLSTM — Teacher Feedback
 

@@ -153,11 +153,20 @@ Phases iterate per CRISP-DM. Evaluation findings may force return to Data Prepar
 - `/nb:plan` for Phase 4 reads R6 + R7. Plans LSTM baseline first, then CNN-LSTM, xLSTM, Transformer in series (each runs as its own `/nb:build` cycle so we don't carry mistakes forward).
 - For xLSTM specifically: sub-plan must decide official `xlstm` package vs community port. Validate package install on Apple Silicon (M4 Pro) before committing — known to require careful CUDA / MPS handling.
 
-**Build sequence (each = own `/nb:build`):**
-1. LSTM baseline (target: any positive minority-F1 above naive).
-2. CNN-LSTM (target: beat LSTM minority-F1).
-3. xLSTM (target: beat CNN-LSTM OR document why it doesn't on this scale).
-4. Transformer / TFT (time-permitting; document if skipped).
+**Build sequence (each = own `/nb:build`)** — revised per R6 findings:
+
+0. **XGBoost baseline (NEW)** — boring control. Effective sample size ~117 (stride=1 = 60× overlap) → small-data regime favors gradient boosting. Likely beats all DL on this dataset; mandatory academic control. ~1 day.
+1. **LSTM baseline** — target: any positive minority-F1 above naive baseline.
+2. **CNN-LSTM** — kernel=3 directly encodes 3-candle FVG locality. **Expected best DL.** Target: beat LSTM minority-F1.
+3. **xLSTM** — 2025 MDPI study found xLSTM *worse* than vanilla LSTM on short-term financial forecasting; included for academic completeness (teacher feedback) but don't expect it to win. Apple Silicon config: `step_kernel="native"`, `sequence_kernel="native_sequence__native"`, `sLSTMBlockConfig(backend="vanilla")`. Smoke-test day 1.
+4. **Transformer (lightweight)** — keep tiny; small-data regime risks overfit. Skippable if time-pressed.
+
+**Excluded from MVP** (future work): CNN+xLSTM hybrid, CNN+Transformer hybrid. Bidirectional LSTM rejected (unsafe at label-position-59).
+
+**MPS gotchas to honour in code:**
+- `nn.LSTMCell` slower than CPU on M-series → use sequence-batched `nn.LSTM`
+- `nn.MultiheadAttention` + boolean mask + dropout = NaN on MPS → workaround `x = x + 0` post-attention
+- Deterministic mode broken on MPS (8× slowdown) → fall back to CPU for reproducibility (R7)
 
 Each cycle: `/nb:plan` (architecture-specific if R6 reveals divergence) → `/nb:build` → `@nb-review` → `@nb-test` → log results. Reuse Phase 3 dataset unchanged.
 
