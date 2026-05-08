@@ -1,0 +1,37 @@
+# Override global gitignore — track CLAUDE.md and .nb-suite for this project
+!CLAUDE.md
+!.nb-suite/
+!.nb-suite/**
+
+# Standard Python ignores
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Data caches (regeneratable, large)
+data/raw/*.parquet
+data/processed/*.parquet
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Trained model weights (large, regeneratable)
+models/*.pt
+models/*.pth
+
+# Logs
+logs/
+*.log
+
+# Env vars (real)
+.env
+.env.local
+
+# OS
+.DS_Store
