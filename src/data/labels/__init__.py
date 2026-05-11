@@ -22,3 +22,4 @@ def register(name: str) -> Callable[[type[T]], type[T]]:
 # Import concrete labellers so their @register decorators fire.
 # Must come after LABELLERS + register are defined to avoid circular import.
 from src.data.labels import fvg  # noqa: E402, F401
+from src.data.labels import valid_fvg  # noqa: E402, F401

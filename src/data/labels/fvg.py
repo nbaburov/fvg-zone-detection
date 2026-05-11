@@ -10,6 +10,7 @@ from src.data.labels.base import BaseLabeller
 
 
 @register("fvg")
+@register("fvg_raw")
 class FVGLabeller(BaseLabeller):
     """
     Bullish FVG at candle i: high[i-1] < low[i+1] AND close[i] > open[i].
