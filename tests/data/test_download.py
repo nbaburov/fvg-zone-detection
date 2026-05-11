@@ -84,7 +84,7 @@ def two_days_minute_bars():
     return pd.concat([d1, d2])
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_output_columns(MockClient, two_days_minute_bars):
     from src.data.download import download_spy_h1
@@ -102,7 +102,7 @@ def test_output_columns(MockClient, two_days_minute_bars):
     assert required.issubset(set(result.columns)), f"Missing columns: {required - set(result.columns)}"
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_index_is_new_york_timezone(MockClient, two_days_minute_bars):
     from src.data.download import download_spy_h1
@@ -120,7 +120,7 @@ def test_index_is_new_york_timezone(MockClient, two_days_minute_bars):
     assert "New_York" in str(result.index.tz) or "America" in str(result.index.tz)
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_no_after_hours_bars(MockClient, two_days_minute_bars):
     """No bar timestamp outside 09:30–15:59 ET should appear in H1 output."""
@@ -153,7 +153,7 @@ def test_no_after_hours_bars(MockClient, two_days_minute_bars):
         )
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_half_day_tagged_as_half(MockClient):
     """Black Friday session bars tagged with session_type='half'."""
@@ -178,7 +178,7 @@ def test_half_day_tagged_as_half(MockClient):
     )
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_zero_volume_bar_dropped(MockClient, two_days_minute_bars):
     from src.data.download import download_spy_h1
@@ -201,7 +201,7 @@ def test_zero_volume_bar_dropped(MockClient, two_days_minute_bars):
     assert (result["volume"] > 0).all()
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_ohlc_violation_bar_dropped(MockClient):
     from src.data.download import download_spy_h1
@@ -226,14 +226,14 @@ def test_ohlc_violation_bar_dropped(MockClient):
 def test_environment_error_when_no_creds(mock_dotenv):
     """EnvironmentError raised when API keys are absent."""
     env_without_keys = {k: v for k, v in os.environ.items()
-                        if k not in ("ALPACA_API_KEY", "ALPACA_API_SECRET")}
+                        if k not in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")}
     with patch.dict(os.environ, env_without_keys, clear=True):
         from src.data.download import download_spy_h1
         with pytest.raises(EnvironmentError):
             download_spy_h1(use_cache=False)
 
 
-@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_API_SECRET": "test_secret"})
+@patch.dict(os.environ, {"ALPACA_API_KEY": "test_key", "ALPACA_SECRET_KEY": "test_secret"})
 @patch("src.data.download.StockHistoricalDataClient")
 def test_cache_hit_skips_api(MockClient, two_days_minute_bars):
     """When cache parquet exists and use_cache=True, Alpaca SDK is never called."""

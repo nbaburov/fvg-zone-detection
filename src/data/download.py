@@ -44,10 +44,10 @@ def _get_credentials() -> tuple[str, str]:
     """Load and validate Alpaca credentials from environment."""
     load_dotenv()  # Load .env at call time, not import time
     key = os.environ.get("ALPACA_API_KEY", "")
-    secret = os.environ.get("ALPACA_API_SECRET", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
     if not key or not secret:
         raise EnvironmentError(
-            "ALPACA_API_KEY and ALPACA_API_SECRET must be set. "
+            "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set. "
             "Copy .env.example to .env and fill in your paper account credentials."
         )
     return key, secret
@@ -161,7 +161,7 @@ def download_spy_h1(
     Columns: open, high, low, close, volume (float64), session_type (Categorical: 'full'|'half').
     Index frequency: not guaranteed regular (gaps for holidays/weekends — expected).
 
-    Raises: EnvironmentError if ALPACA_API_KEY or ALPACA_API_SECRET not set.
+    Raises: EnvironmentError if ALPACA_API_KEY or ALPACA_SECRET_KEY not set.
     Raises: ValueError if returned bar count < 5000 (sanity check for full multi-year pull).
     """
     cache = Path(cache_path)
