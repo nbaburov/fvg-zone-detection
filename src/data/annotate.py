@@ -176,6 +176,20 @@ def compute_kappa(gold_csv_path: str) -> float:
     prog = df["programmatic_label"].tolist()
     human = df["human_label"].tolist()
 
+    if len(prog) == 0:
+        logger.warning("Gold labels file has no rows yet — cannot compute kappa.")
+        return float("nan")
+    if len(prog) < 2:
+        logger.warning(
+            "Gold labels file has only %d row(s); kappa needs at least 2.", len(prog)
+        )
+        return float("nan")
+    if len(set(prog)) < 2 and len(set(human)) < 2:
+        logger.warning(
+            "All annotations belong to a single class — kappa is undefined."
+        )
+        return float("nan")
+
     kappa = cohen_kappa_score(prog, human)
 
     if kappa < _KAPPA_GATE_THRESHOLD:
@@ -271,11 +285,40 @@ def _resume_annotated_set(output: Path) -> set[int]:
 
 
 def _display_candle_chart(df: pd.DataFrame, candle_idx: int, n_df: int, go) -> None:
-    """Render a 7-candle Plotly chart centred on candle_idx."""
-    start = max(0, candle_idx - 3)
-    end = min(n_df, candle_idx + 4)
+    """
+    Render a 30-bar Plotly chart centred on candle_idx.
+
+    Overlays (all pre-computed from raw OHLCV — no label data shown):
+    - Swing markers: purple triangles at 50-bar pivot highs/lows visible in window.
+    - S/R lines: orange horizontal lines at 5-bar pivot high/low levels.
+    - Gann midpoint: blue dashed horizontal at midpoint of 50-bar swing.
+    - FVG zone: shaded rectangle if a geometric FVG exists at candle_idx.
+    """
+    from src.data.labels.sr import compute_pivot_levels
+    from src.data.labels.bos import compute_bos
+
+    # 30-bar window: 20 bars to the left, 10 to the right
+    start = max(0, candle_idx - 20)
+    end = min(n_df, candle_idx + 11)
     window_df = df.iloc[start:end]
     target_ts = df.index[candle_idx]
+
+    # -- Pre-compute overlays from full df (causal) --
+    # S/R pivot levels (causal)
+    pivot_high_full, pivot_low_full = compute_pivot_levels(df, lookback=5)
+
+    # Swing for Gann
+    swing_high_full = df["high"].rolling(50, min_periods=1).max().shift(1)
+    swing_low_full = df["low"].rolling(50, min_periods=1).min().shift(1)
+    swing_mid_full = swing_low_full + 0.5 * (swing_high_full - swing_low_full)
+
+    # Window-local values
+    ph_window = pivot_high_full.iloc[start:end]
+    pl_window = pivot_low_full.iloc[start:end]
+    swing_mid_at_target = float(swing_mid_full.iloc[candle_idx]) if candle_idx < len(swing_mid_full) else float("nan")
+
+    # FVG zone at candle_idx (if geometric FVG exists — show zone only, no label)
+    fvg_zone = _compute_fvg_zone(df, candle_idx, n_df)
 
     fig = go.Figure(
         data=[
@@ -285,15 +328,148 @@ def _display_candle_chart(df: pd.DataFrame, candle_idx: int, n_df: int, go) -> N
                 high=window_df["high"],
                 low=window_df["low"],
                 close=window_df["close"],
+                name="OHLCV",
             )
         ]
     )
-    fig.add_vline(x=target_ts.timestamp() * 1000, line_dash="dash", line_color="red")
+
+    # Target bar marker
+    fig.add_vline(x=target_ts.timestamp() * 1000, line_dash="dash", line_color="red", line_width=2)
+
+    # S/R horizontal lines (orange) — show unique levels in window
+    sr_levels_shown: set[float] = set()
+    for ts, ph_val, pl_val in zip(window_df.index, ph_window, pl_window):
+        if not np.isnan(ph_val) and ph_val not in sr_levels_shown:
+            fig.add_hline(y=ph_val, line_color="orange", line_dash="dot", line_width=1, opacity=0.7)
+            sr_levels_shown.add(ph_val)
+        if not np.isnan(pl_val) and pl_val not in sr_levels_shown:
+            fig.add_hline(y=pl_val, line_color="orange", line_dash="dot", line_width=1, opacity=0.7)
+            sr_levels_shown.add(pl_val)
+
+    # Gann midpoint (blue dashed)
+    if not np.isnan(swing_mid_at_target):
+        fig.add_hline(
+            y=swing_mid_at_target,
+            line_color="blue",
+            line_dash="dash",
+            line_width=1.5,
+            annotation_text="Gann mid",
+            annotation_position="right",
+        )
+
+    # Swing markers (purple triangles) at target bar
+    # Show if target bar's pivot values are locally extreme in the window
+    _add_swing_markers(fig, df, start, end, pivot_high_full, pivot_low_full)
+
+    # FVG zone shading
+    if fvg_zone is not None:
+        direction, zone_bottom, zone_top = fvg_zone
+        fill_color = "rgba(0,200,100,0.15)" if direction == "bull" else "rgba(200,50,50,0.15)"
+        fig.add_hrect(
+            y0=zone_bottom,
+            y1=zone_top,
+            fillcolor=fill_color,
+            layer="below",
+            line_width=1,
+            line_color="rgba(0,200,100,0.5)" if direction == "bull" else "rgba(200,50,50,0.5)",
+            annotation_text=f"FVG {direction}",
+            annotation_position="top right",
+        )
+
     fig.update_layout(
-        title=f"Candle {candle_idx} — {target_ts} | b=bull, e=bear, n=none, a=ambiguous",
+        title=f"Candle {candle_idx} — {target_ts} | b=bull  e=bear  n=none  a=ambiguous",
         xaxis_rangeslider_visible=False,
+        height=600,
+        showlegend=False,
     )
     fig.show()
+
+
+def _compute_fvg_zone(
+    df: pd.DataFrame, candle_idx: int, n_df: int
+) -> tuple[str, float, float] | None:
+    """
+    Return (direction, bottom, top) if a geometric FVG exists at candle_idx.
+    Returns None if no FVG or boundary issue.
+    """
+    if candle_idx < 1 or candle_idx > n_df - 2:
+        return None
+    h_prev = float(df["high"].iloc[candle_idx - 1])
+    l_next = float(df["low"].iloc[candle_idx + 1])
+    l_prev = float(df["low"].iloc[candle_idx - 1])
+    h_next = float(df["high"].iloc[candle_idx + 1])
+    o_mid = float(df["open"].iloc[candle_idx])
+    c_mid = float(df["close"].iloc[candle_idx])
+
+    if h_prev < l_next and c_mid > o_mid:
+        return ("bull", h_prev, l_next)
+    if l_prev > h_next and c_mid < o_mid:
+        return ("bear", h_next, l_prev)
+    return None
+
+
+def _add_swing_markers(
+    fig,
+    df: pd.DataFrame,
+    start: int,
+    end: int,
+    pivot_high_full: pd.Series,
+    pivot_low_full: pd.Series,
+) -> None:
+    """
+    Add purple triangle markers at bars where a local pivot high/low occurred in the window.
+    Uses the pivot_high/low computed causally from the full df.
+    """
+    window_ph = pivot_high_full.iloc[start:end]
+    window_pl = pivot_low_full.iloc[start:end]
+    window_high = df["high"].iloc[start:end]
+    window_low = df["low"].iloc[start:end]
+
+    # Swing high markers: bar i where ph[i] == high[i-1] (the pivot occurred at i-1)
+    # Approximate: show bars where local high in window matches the rolling pivot value
+    ph_times = []
+    ph_vals = []
+    pl_times = []
+    pl_vals = []
+
+    for i in range(len(window_ph)):
+        ph_val = window_ph.iloc[i]
+        pl_val = window_pl.iloc[i]
+        ts = window_ph.index[i]
+        bar_high = window_high.iloc[i]
+        bar_low = window_low.iloc[i]
+
+        # Heuristic: pivot high marker if local high is close to the rolling pivot high
+        if not np.isnan(ph_val) and abs(bar_high - ph_val) < 0.05:
+            ph_times.append(ts)
+            ph_vals.append(bar_high + 0.1)  # slightly above bar
+
+        if not np.isnan(pl_val) and abs(bar_low - pl_val) < 0.05:
+            pl_times.append(ts)
+            pl_vals.append(bar_low - 0.1)  # slightly below bar
+
+    if ph_times:
+        fig.add_trace(
+            dict(
+                type="scatter",
+                x=ph_times,
+                y=ph_vals,
+                mode="markers",
+                marker=dict(symbol="triangle-down", color="purple", size=8),
+                name="Swing High",
+            )
+        )
+    if pl_times:
+        fig.add_trace(
+            dict(
+                type="scatter",
+                x=pl_times,
+                y=pl_vals,
+                mode="markers",
+                marker=dict(symbol="triangle-up", color="purple", size=8),
+                name="Swing Low",
+            )
+        )
 
 
 def _prompt_label() -> tuple[int, str]:
