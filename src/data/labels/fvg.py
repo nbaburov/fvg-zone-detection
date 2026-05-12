@@ -1,4 +1,12 @@
-"""FVG (Fair Value Gap) labeller — vectorised, no row-loops."""
+"""FVG (Fair Value Gap) labeller — vectorised, no row-loops.
+
+NOTE: FVGLabeller is kept for historical baseline comparison only.
+The canonical training target is ValidFVGLabeller ("fvg_valid").
+Do not use "fvg" or "fvg_raw" for new training runs.
+Raw-FVG checkpoints (lstm_seed42_rawfvg.pt, xgb_seed42_rawfvg.ubj) require
+this labeller to remain importable for SMCWindowDataset construction during inspect.
+See docs/models-status.md for the dual-FVG baseline comparison table.
+"""
 
 from __future__ import annotations
 

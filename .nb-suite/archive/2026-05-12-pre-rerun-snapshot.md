@@ -39,6 +39,12 @@ Total reclaim: ~76 MB reports + 6 MB checkpoints.
 
 ## Key findings worth remembering (rigor sprint 12-May-26)
 
+> **Annotation added 12-May-26 post-migration:** The raw-FVG numbers in this table
+> (LSTM 0.836, XGB 0.637) were produced on `FVGLabeller` (geometric, ~25% positive rate).
+> ValidFVG results (LSTM ~0.60, XGB ~0.52) are on `ValidFVGLabeller` (6-criteria, ~3% positive).
+> These are not regression — they measure different problems. Do not compare directly.
+> See `reports/rigor/2026-05-13/baselines/dual_fvg_compare.md` for proper side-by-side numbers.
+
 ### Baselines (2016–2025 partial / 2018–2024 original)
 
 | Model | Splits | Test Macro F1 | Notes |

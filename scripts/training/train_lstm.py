@@ -33,10 +33,11 @@ import torch.nn as nn
 from sklearn.metrics import classification_report, confusion_matrix
 from torch.utils.data import DataLoader
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to path (scripts/training/ is 2 levels below repo root)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.data.labels import LABELLERS
+from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
 from src.data.window import SMCWindowDataset
 from src.models.lstm import FVGLSTMClassifier
 from src.training.early_stop import EarlyStop
@@ -75,6 +76,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--debug", action="store_true",
                    help="Overfit check: train on 200-sample subset for 5 epochs")
     p.add_argument("--max-epochs", type=int, default=MAX_EPOCHS)
+    p.add_argument(
+        "--splits",
+        default="default",
+        help=(
+            "default: use pre-split parquets from data/processed/. "
+            "legacy: re-split spy_h1_labeled.parquet with SPLIT_BOUNDARIES_2018_2024. "
+            "Or a path to a directory containing spy_h1_{train,val,test}.parquet."
+        ),
+    )
+    p.add_argument(
+        "--label",
+        choices=["validfvg", "rawfvg"],
+        default="validfvg",
+        help=(
+            "validfvg (default): load class_weights.json, save as lstm_seed{N}.pt. "
+            "rawfvg: load class_weights_rawfvg.json from splits dir, save as lstm_seed{N}_rawfvg.pt."
+        ),
+    )
     return p.parse_args()
 
 
@@ -95,18 +114,37 @@ def select_device(requested: str) -> torch.device:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def load_datasets(debug: bool = False) -> tuple:
+def load_datasets(debug: bool = False, splits: str = "default", label: str = "validfvg") -> tuple:
     """Load train/val/test datasets with stride=1 (matches XGBoost evaluation)."""
-    labeller_key = "fvg_valid"
+    labeller_key = "fvg" if label == "rawfvg" else "fvg_valid"
     if labeller_key not in LABELLERS:
         available = list(LABELLERS.keys())
         raise KeyError(f"Labeller '{labeller_key}' not found. Available: {available}")
 
     labeller = LABELLERS[labeller_key]()
 
-    train_df = pd.read_parquet("data/processed/spy_h1_train.parquet")
-    val_df   = pd.read_parquet("data/processed/spy_h1_val.parquet")
-    test_df  = pd.read_parquet("data/processed/spy_h1_test.parquet")
+    if splits == "legacy":
+        labeled_df = pd.read_parquet("data/processed/spy_h1_labeled.parquet")
+        # Re-apply ValidFVG labeller so label column matches the default-splits task
+        _labeller_key = labeller_key
+        _labeller_cls = LABELLERS[_labeller_key]
+        _tmp_labeller = _labeller_cls()
+        _valid_labels = _tmp_labeller.label(labeled_df)
+        labeled_df = labeled_df.copy()
+        labeled_df["label"] = _valid_labels.map(_tmp_labeller.encoded_map).astype(int)
+        train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
+        print(f"  Using SPLIT_BOUNDARIES_2018_2024 + ValidFVG re-label (train 2018-2021, test 2023-2024)")
+    elif splits == "default":
+        train_df = pd.read_parquet("data/processed/spy_h1_train.parquet")
+        val_df   = pd.read_parquet("data/processed/spy_h1_val.parquet")
+        test_df  = pd.read_parquet("data/processed/spy_h1_test.parquet")
+    else:
+        # Treat as a directory path containing pre-split parquets
+        splits_dir = Path(splits)
+        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        print(f"  Using custom splits dir: {splits_dir}")
 
     if debug:
         train_df = train_df.iloc[:260]  # 260 rows -> ~200 windows with stride=1
@@ -133,7 +171,10 @@ def load_datasets(debug: bool = False) -> tuple:
     # Validate test positives
     test_counts = test_ds.label_counts
     test_pos = sum(v for k, v in test_counts.items() if k != 0)
-    assert test_pos >= 200, f"Test positives {test_pos} < 200 — data loading issue"
+    if test_pos < 200:
+        print(f"WARNING: Test positives {test_pos} < 200 — F1 may be unreliable (ValidFVG is rare)")
+    else:
+        print(f"Test positives sanity: {test_pos} >= 200 OK")
 
     return train_ds, val_ds, test_ds
 
@@ -515,16 +556,25 @@ def main() -> None:
     print(f"Metadata: {metadata}")
 
     # Data
-    train_ds, val_ds, test_ds = load_datasets(debug=args.debug)
+    train_ds, val_ds, test_ds = load_datasets(debug=args.debug, splits=args.splits, label=args.label)
     train_loader, val_loader, test_loader = make_loaders(train_ds, val_ds, test_ds, args.seed)
 
-    # Class weights
-    with open("data/processed/class_weights.json") as f:
+    # Class weights — path depends on --label and --splits
+    if args.splits in ("default", "legacy"):
+        cw_dir = Path("data/processed")
+    else:
+        cw_dir = Path(args.splits)
+    if args.label == "rawfvg":
+        cw_filename = "class_weights_rawfvg.json"
+    else:
+        cw_filename = "class_weights.json"
+    cw_path = cw_dir / cw_filename
+    with open(cw_path) as f:
         cw = json.load(f)
     class_weights = torch.tensor(
         [cw["0"], cw["1"], cw["2"]], dtype=torch.float32
     ).to(device)
-    print(f"Class weights: {class_weights}")
+    print(f"Class weights ({cw_path}): {class_weights}")
 
     # Model
     model = FVGLSTMClassifier().to(device)
@@ -533,11 +583,15 @@ def main() -> None:
 
     criterion = WeightedCE(class_weights)
 
-    # Output paths
+    # Output paths — label suffix only when rawfvg; validfvg keeps existing naming (no suffix)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = out_dir / f"lstm_seed{args.seed}.pt"
-    log_csv_path = Path("logs") / f"lstm_seed{args.seed}.csv"
+    label_tag = f"_{args.label}" if args.label != "validfvg" else ""
+    splits_tag = f"_splits{args.splits}" if args.splits not in ("default", "legacy") else (
+        f"_splits{args.splits}" if args.splits == "legacy" else ""
+    )
+    ckpt_path = out_dir / f"lstm_seed{args.seed}{label_tag}.pt"
+    log_csv_path = Path("logs") / f"lstm_seed{args.seed}{label_tag}.csv"
     log_csv_path.parent.mkdir(parents=True, exist_ok=True)
     eval_log_path = Path(".nb-suite/test-logs/11-May-26/lstm-baseline.md")
 
@@ -589,9 +643,11 @@ def main() -> None:
               f"({NAIVE_MACRO_F1:.4f}) — training may have failed")
 
     # Save metadata sidecar
-    meta_path = out_dir / f"lstm_seed{args.seed}.meta.json"
+    meta_path = out_dir / f"lstm_seed{args.seed}{label_tag}.meta.json"
     meta_out = {
         **metadata,
+        "splits": args.splits,
+        "label": args.label,
         "best_epoch": best_epoch,
         "best_smoothed_val_macro_f1": best_smoothed_f1,
         "test_macro_f1": test_metrics["macro_f1"],

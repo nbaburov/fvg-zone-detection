@@ -1,0 +1,17 @@
+{
+  "seed": 42,
+  "splits": "data/processed/rawfvg",
+  "label": "rawfvg",
+  "git_sha": "4f64f03",
+  "timestamp": "2026-05-12T11:39:01.925171+00:00",
+  "python": "3.12.13",
+  "xgboost": "3.2.0",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "n_estimators_used": 300,
+  "best_val_mlogloss": 0.7061462146356193,
+  "val_macro_f1": 0.6032305042021037,
+  "test_macro_f1": 0.5889889893339001,
+  "test_bull_f1": 0.543572044866264,
+  "test_bear_f1": 0.5030978934324659,
+  "naive_majority_macro_f1": 0.2851900777924556
+}

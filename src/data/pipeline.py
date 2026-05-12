@@ -48,7 +48,7 @@ def _compute_class_weights(
 
 
 def build_pipeline(
-    labeller_name: str = "fvg",
+    labeller_name: str = "fvg_valid",
     window_size: int = 60,
     start: str = "2018-01-01",
     end: str | None = "2025-12-31",
@@ -60,7 +60,8 @@ def build_pipeline(
     Returns (train_dataset, val_dataset, test_dataset, class_weights).
     class_weights: Tensor of shape (num_classes,), dtype float32.
                    Computed on train split only.
-                   Persisted to {PROCESSED_DIR}/class_weights.json.
+                   Persisted to {PROCESSED_DIR}/class_weights_{labeller_name}.json
+                   (and legacy alias {PROCESSED_DIR}/class_weights.json).
     train_dataset stride = 1.
     val_dataset stride = 60.
     test_dataset stride = 60.
@@ -101,12 +102,20 @@ def build_pipeline(
     num_classes = labeller.num_classes
     class_weights = _compute_class_weights(train_df, num_classes=num_classes)
 
-    # Persist class weights
-    weights_path = out_dir / "class_weights.json"
+    # Persist class weights — write both a labeller-suffixed file and the legacy alias.
+    # Suffixed file: class_weights_{labeller_name}.json (canonical name for new consumers).
+    # Legacy alias:  class_weights.json (backwards compat — existing checkpoint .meta.json
+    #                and training scripts that hardcode this name continue to work).
     weights_dict = {str(i): float(class_weights[i]) for i in range(num_classes)}
-    with open(weights_path, "w") as f:
-        json.dump(weights_dict, f, indent=2)
-    logger.info("Class weights written to %s: %s", weights_path, weights_dict)
+    suffixed_path = out_dir / f"class_weights_{labeller_name}.json"
+    legacy_path = out_dir / "class_weights.json"
+    for weights_path in (suffixed_path, legacy_path):
+        with open(weights_path, "w") as f:
+            json.dump(weights_dict, f, indent=2)
+    logger.info(
+        "Class weights written to %s (and legacy alias %s): %s",
+        suffixed_path, legacy_path, weights_dict,
+    )
 
     # Step 4: Build window datasets
     # Note: drop_cross_session_windows=False — RTH H1 = 7 bars/day, every window spans

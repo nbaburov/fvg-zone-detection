@@ -2,8 +2,8 @@
 
 What is trained, what data it saw, what splits we have, how it performs, what's validated.
 
-> **Current label target (training):** `FVGLabeller` — raw geometric 3-candle FVG at index N+1.
-> `ValidFVGLabeller` (6-criteria SMC @ N+2) is implemented and validated against the gold set (κ=1.0) but the trained checkpoints below were produced on the raw labels. Migrating training to the validated labels is the next phase.
+> **Current label target (training):** `ValidFVGLabeller` ("fvg_valid") — 6-criteria SMC FVG @ N+2.
+> Raw `FVGLabeller` ("fvg") results are preserved in the Dual-FVG Baselines section as historical comparison. Not a regression — different problem.
 
 ## Data splits (temporal, no shuffle)
 
@@ -421,3 +421,41 @@ Note: XGB early-stops at round 3 due to val mlogloss hitting minimum under extre
 |-------|------------------------------------|-----------------------------|------|
 | LSTM macro F1 | 0.8365 ± 0.009 | 0.5980 (seed 42) | Different labeller — not regression |
 | XGB macro F1 | 0.6365 ± 0.004 | 0.5222 (seed 42) | Different labeller — not regression |
+
+---
+
+## Dual-FVG Baseline Comparison (12-May-26)
+
+Side-by-side raw FVG vs ValidFVG on the same 2016–2025 data range (same splits, seed 42 only).
+Full report: `reports/rigor/2026-05-13/baselines/dual_fvg_compare.md`
+
+> **Raw FVG higher F1 is expected — not a regression. These measure different problems.**
+> Raw FVG: geometric 3-candle gap (~25% positive rate, easier classification).
+> ValidFVG: 6-criteria strict SMC FVG (~3% positive rate, harder, more financially meaningful).
+
+| Model | Label | Pos rate | Test Macro F1 | Bull F1 | Bear F1 |
+|-------|-------|----------|---------------|---------|---------|
+| LSTM seed42  | raw FVG  | 25.2% | 0.8753 | 0.8473 | 0.8310 |
+| LSTM seed42  | ValidFVG | 3.1%  | 0.5983 | 0.4335 | 0.3802 |
+| XGB seed42   | raw FVG  | 25.2% | 0.5890 | 0.5436 | 0.5031 |
+| XGB seed42   | ValidFVG | 3.1%  | 0.5294 | 0.4329 | 0.2291 |
+| Naive majority | raw FVG  | 25.2% | 0.2852 | — | — |
+| Naive majority | ValidFVG | 3.1%  | 0.3281 | — | — |
+
+**Key observations:**
+- LSTM beats naive by +0.27 on raw FVG, +0.27 on ValidFVG — consistent above-naive margin on both targets.
+- XGB beats naive by +0.30 on raw FVG, +0.20 on ValidFVG.
+- XGB early-stops at round 3 on ValidFVG (val mlogloss criterion unsuited to 97% none class) — bear F1=0.23 near chance. Recommend val macro-F1 early-stop for next run.
+- LSTM is the stronger model on both targets. CNN-LSTM is the next architecture.
+
+**Phase D (next):** full rigor rerun (seed variance, HP tuning, threshold, bootstrap CI) on ValidFVG only.
+
+---
+
+## Historical Raw-FVG Baselines (archive)
+
+Rigor sprint results from the 2018–2024 raw-FVG era are preserved below for reference.
+These numbers used `FVGLabeller` (geometric, ~25% positive rate, N+1 label).
+Do not compare directly with V2/ValidFVG numbers — different problem.
+
+See also `.nb-suite/archive/2026-05-12-pre-rerun-snapshot.md` for the pre-extension snapshot.

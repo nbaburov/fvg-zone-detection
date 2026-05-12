@@ -1,0 +1,18 @@
+{
+  "git_sha": "4f64f03",
+  "torch_version": "2.11.0",
+  "python_version": "3.12.13",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "device": "cpu (forced \u2014 MPS LSTM bug, see .nb-suite/research/12-May-26/mps-gpu-fix.md)",
+  "seed": 42,
+  "timestamp": "2026-05-12T11:38:52.760866+00:00",
+  "splits": "data/processed/rawfvg",
+  "label": "rawfvg",
+  "best_epoch": 100,
+  "best_smoothed_val_macro_f1": 0.8903747482328654,
+  "test_macro_f1": 0.8752996935680578,
+  "test_bull_f1": 0.8473282442748091,
+  "test_bear_f1": 0.831013916500994,
+  "nan_detected": false,
+  "n_params": 51651
+}

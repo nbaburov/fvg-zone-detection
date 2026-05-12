@@ -1,0 +1,16 @@
+{
+  "seed": 42,
+  "splits": "default",
+  "git_sha": "4f64f03",
+  "timestamp": "2026-05-12T10:54:55.219614+00:00",
+  "python": "3.12.13",
+  "xgboost": "3.2.0",
+  "platform": "macOS-26.3.1-arm64-arm-64bit",
+  "n_estimators_used": 33,
+  "best_val_mlogloss": 0.35209947537512326,
+  "val_macro_f1": 0.538722774739631,
+  "test_macro_f1": 0.5294247261136621,
+  "test_bull_f1": 0.4329411764705882,
+  "test_bear_f1": 0.22905982905982905,
+  "naive_majority_macro_f1": 0.32802371412749604
+}

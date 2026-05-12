@@ -34,6 +34,8 @@ REPO = Path(__file__).resolve().parent.parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from src.data.labels import LABELLERS
+from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
 from src.features.window_features import FEATURE_NAMES, extract_window_features
 from src.models.xgboost_baseline import XGBoostFVGClassifier
 
@@ -46,6 +48,24 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train XGBoost FVG baseline.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-dir", type=str, default="checkpoints/xgboost")
+    parser.add_argument(
+        "--splits",
+        default="default",
+        help=(
+            "default: use pre-split parquets from data/processed/. "
+            "legacy: re-split spy_h1_labeled.parquet with SPLIT_BOUNDARIES_2018_2024. "
+            "Or a path to a directory containing spy_h1_{train,val,test}.parquet."
+        ),
+    )
+    parser.add_argument(
+        "--label",
+        choices=["validfvg", "rawfvg"],
+        default="validfvg",
+        help=(
+            "validfvg (default): load class_weights.json, save as xgb_seed{N}.ubj. "
+            "rawfvg: load class_weights_rawfvg.json from splits dir, save as xgb_seed{N}_rawfvg.ubj."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -99,6 +119,7 @@ def main() -> None:
     print(f"Python:        {sys.version.split()[0]}")
     print(f"XGBoost:       {xgb.__version__}")
     print(f"Seed:          {seed}")
+    print(f"Splits:        {args.splits}")
     print(f"Timestamp:     {ts}")
     print()
 
@@ -107,11 +128,31 @@ def main() -> None:
     # ------------------------------------------------------------------
     data_dir = REPO / "data" / "processed"
     print("Loading splits...")
-    train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-    val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-    test_df = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+    if args.splits == "legacy":
+        labeled_df = pd.read_parquet(data_dir / "spy_h1_labeled.parquet")
+        # Re-apply ValidFVG labeller so label column matches the default-splits task
+        _labeller = LABELLERS["fvg_valid"]()
+        _valid_labels = _labeller.label(labeled_df)
+        labeled_df = labeled_df.copy()
+        labeled_df["label"] = _valid_labels.map(_labeller.encoded_map).astype(int)
+        train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
+        print(f"  Using SPLIT_BOUNDARIES_2018_2024 + ValidFVG re-label (train 2018-2021, test 2023-2024)")
+        splits_data_dir = data_dir
+    elif args.splits == "default":
+        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
+        val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
+        test_df = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        splits_data_dir = data_dir
+    else:
+        # Treat as a directory path containing pre-split parquets
+        splits_data_dir = Path(args.splits)
+        train_df = pd.read_parquet(splits_data_dir / "spy_h1_train.parquet")
+        val_df = pd.read_parquet(splits_data_dir / "spy_h1_val.parquet")
+        test_df = pd.read_parquet(splits_data_dir / "spy_h1_test.parquet")
+        print(f"  Using custom splits dir: {splits_data_dir}")
 
-    with open(data_dir / "class_weights.json") as fh:
+    cw_filename = "class_weights_rawfvg.json" if args.label == "rawfvg" else "class_weights.json"
+    with open(splits_data_dir / cw_filename) as fh:
         cw_raw = json.load(fh)
     class_weights = {int(k): float(v) for k, v in cw_raw.items()}
     print(f"Class weights: {class_weights}")
@@ -171,6 +212,24 @@ def main() -> None:
     print(f"  Final n_estimators used: {n_used}")
     print(f"  Best val mlogloss:       {best_mlogloss:.6f}")
     print(f"  Val merror at best:      {best_merror_val:.4f}")
+
+    # Risk mitigation: if early-stop fires at < 50 rounds, fall back to fixed n_estimators=527
+    # (best from archived Optuna). This was seen on ValidFVG ~97% none; rawfvg ~25% pos should
+    # not trigger it, but guard just in case.
+    FALLBACK_N_ESTIMATORS = 527
+    if n_used < 50:
+        print(
+            f"\nWARNING: XGBoost stopped at {n_used} < 50 estimators — early-stop likely fired "
+            f"before convergence. Falling back to fixed n_estimators={FALLBACK_N_ESTIMATORS}."
+        )
+        model_fb = XGBoostFVGClassifier(params={"n_estimators": FALLBACK_N_ESTIMATORS})
+        model_fb.fit(X_train, y_train, X_val, y_val, sample_weight=sample_weight)
+        model = model_fb
+        n_used = FALLBACK_N_ESTIMATORS
+        evals = model.evals_result
+        val_mlogloss_history = evals.get("validation_0", {}).get("mlogloss", [])
+        best_mlogloss = min(val_mlogloss_history) if val_mlogloss_history else float("nan")
+        print(f"  Fallback n_estimators={FALLBACK_N_ESTIMATORS}, best val mlogloss={best_mlogloss:.6f}")
 
     # ------------------------------------------------------------------
     # 6. Naive baseline
@@ -236,9 +295,34 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 10. Save model
     # ------------------------------------------------------------------
-    model_path = output_dir / "xgb_seed42.ubj"
+    label_tag = f"_{args.label}" if args.label != "validfvg" else ""
+    model_path = output_dir / f"xgb_seed{seed}{label_tag}.ubj"
     model.save(model_path)
     print(f"\nModel saved: {model_path}")
+
+    # Write meta.json sidecar
+    import platform
+    meta_path = output_dir / f"xgb_seed{seed}{label_tag}.meta.json"
+    meta_out = {
+        "seed": seed,
+        "splits": args.splits,
+        "label": args.label,
+        "git_sha": sha,
+        "timestamp": ts,
+        "python": sys.version.split()[0],
+        "xgboost": xgb.__version__,
+        "platform": platform.platform(),
+        "n_estimators_used": int(n_used),
+        "best_val_mlogloss": float(best_mlogloss),
+        "val_macro_f1": float(val_report_dict["macro avg"]["f1-score"]),
+        "test_macro_f1": float(macro_f1_test),
+        "test_bull_f1": float(bull_f1_test),
+        "test_bear_f1": float(bear_f1_test),
+        "naive_majority_macro_f1": float(naive_f1),
+    }
+    with open(meta_path, "w") as fh:
+        json.dump(meta_out, fh, indent=2)
+    print(f"Meta saved:  {meta_path}")
 
     # ------------------------------------------------------------------
     # 11. Write evaluation log

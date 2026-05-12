@@ -1,8 +1,8 @@
 # XGBoost Baseline Evaluation — Phase 4 Step 0
 
-**Date:** 2026-05-11
-**Git SHA:** 10f6d1d
-**Python:** 3.14.4
+**Date:** 2026-05-12
+**Git SHA:** 4f64f03
+**Python:** 3.12.13
 **XGBoost:** 3.2.0
 **Seed:** 42
 
@@ -10,12 +10,12 @@
 
 | Split | Windows | Positives | Positive rate |
 |-------|---------|-----------|--------------|
-| Train | 6997 | 1718 | 24.6% |
+| Train | 10518 | 2545 | 24.2% |
 | Val   | 1698 | 458 | 27.0% |
-| Test  | 3455 | 882 | 25.5% |
+| Test  | 5198 | 1312 | 25.2% |
 
 Note: stride=1, window=60 for all splits. Overlapping windows are expected.
-Test positives sanity: 882 (threshold: >= 200).
+Test positives sanity: 1312 (threshold: >= 200).
 
 ## Hyperparameters
 
@@ -35,37 +35,37 @@ Test positives sanity: 882 (threshold: >= 200).
 
 ## Training
 
-- Final n_estimators used: 297 (early stopping on val mlogloss)
-- Best val mlogloss: 0.680628
-- Val merror at best: 0.3357
-- Val mlogloss curve (first 5): ['1.0826', '1.0716', '1.0608', '1.0488', '1.0394']
-- Val mlogloss curve (last 5):  ['0.6817', '0.6814', '0.6812', '0.6809', '0.6806']
+- Final n_estimators used: 300 (early stopping on val mlogloss)
+- Best val mlogloss: 0.706146
+- Val merror at best: 0.3498
+- Val mlogloss curve (first 5): ['1.0847', '1.0723', '1.0630', '1.0529', '1.0437']
+- Val mlogloss curve (last 5):  ['0.7067', '0.7067', '0.7065', '0.7064', '0.7061']
 
 ## Naive baseline (always-majority, test set)
 
-F1 macro: 0.2846  ← majority-class predictor for reference
+F1 macro: 0.2852  ← majority-class predictor for reference
 
 ## Validation results
 
 ```
               precision    recall  f1-score   support
 
-        none     0.8743    0.6339    0.7349      1240
-        bull     0.4571    0.7652    0.5724       230
-        bear     0.4010    0.7281    0.5171       228
+        none     0.8868    0.6000    0.7157      1240
+        bull     0.4378    0.7957    0.5648       230
+        bear     0.4014    0.7763    0.5291       228
 
-    accuracy                         0.6643      1698
-   macro avg     0.5775    0.7091    0.6081      1698
-weighted avg     0.7542    0.6643    0.6837      1698
+    accuracy                         0.6502      1698
+   macro avg     0.5753    0.7240    0.6032      1698
+weighted avg     0.7608    0.6502    0.6702      1698
 
 ```
 
 Confusion matrix (val) — rows=actual, cols=predicted (none/bull/bear):
 ```
                  none      bull      bear
-        none       786       208       246
-        bull        52       176         2
-        bear        61         1       166
+        none       744       234       262
+        bull        45       183         2
+        bear        50         1       177
 ```
 
 ## Test results (primary)
@@ -73,59 +73,59 @@ Confusion matrix (val) — rows=actual, cols=predicted (none/bull/bear):
 ```
               precision    recall  f1-score   support
 
-        none     0.8863    0.6576    0.7550      2573
-        bull     0.4354    0.7534    0.5519       519
-        bear     0.4043    0.7218    0.5183       363
+        none     0.9030    0.5991    0.7203      3886
+        bull     0.4128    0.7955    0.5436       792
+        bear     0.3711    0.7808    0.5031       520
 
-    accuracy                         0.6787      3455
-   macro avg     0.5754    0.7109    0.6084      3455
-weighted avg     0.7680    0.6787    0.6996      3455
+    accuracy                         0.6472      5198
+   macro avg     0.5623    0.7251    0.5890      5198
+weighted avg     0.7751    0.6472    0.6716      5198
 
 ```
 
 Confusion matrix (test) — rows=actual, cols=predicted (none/bull/bear):
 ```
                  none      bull      bear
-        none      1692       504       377
-        bull       119       391         9
-        bear        98         3       262
+        none      2328       890       668
+        bull       142       630        20
+        bear       108         6       406
 ```
 
-- **Macro-F1: 0.6084**
-- Minority class F1 (bull): 0.5519
-- Minority class F1 (bear): 0.5183
-- Positive count sanity: 882 windows (>= 200 OK)
+- **Macro-F1: 0.5890**
+- Minority class F1 (bull): 0.5436
+- Minority class F1 (bear): 0.5031
+- Positive count sanity: 1312 windows (>= 200 OK)
 
 ## Comparison to naive baseline
 
 | Metric | Naive (majority) | XGBoost | Delta |
 |--------|-----------------|---------|-------|
-| Macro-F1 | 0.2846 | 0.6084 | +0.3238 |
-| Bull F1  | 0.0000 | 0.5519 | +0.5519 |
-| Bear F1  | 0.0000 | 0.5183 | +0.5183 |
+| Macro-F1 | 0.2852 | 0.5890 | +0.3038 |
+| Bull F1  | 0.0000 | 0.5436 | +0.5436 |
+| Bear F1  | 0.0000 | 0.5031 | +0.5031 |
 
 ## Top-10 feature importances
 
 | Rank | Feature | Importance |
 |------|---------|-----------|
-| 1 | above_ma20 | 0.271602 |
-| 2 | ret_5 | 0.119506 |
-| 3 | gap_bull | 0.034513 |
-| 4 | vol_spike | 0.032081 |
-| 5 | gap_norm_bull | 0.030029 |
-| 6 | gap_bear | 0.028691 |
-| 7 | mid_body_bull | 0.027617 |
-| 8 | mid_body_bear | 0.025091 |
-| 9 | pos_in_range | 0.024688 |
-| 10 | vol_zscore_5 | 0.023550 |
+| 1 | above_ma20 | 0.323089 |
+| 2 | ret_5 | 0.128077 |
+| 3 | gap_norm_bull | 0.034607 |
+| 4 | gap_bull | 0.028149 |
+| 5 | gap_bear | 0.027397 |
+| 6 | vol_spike | 0.025293 |
+| 7 | pos_in_range | 0.022979 |
+| 8 | vol_zscore_5 | 0.022470 |
+| 9 | mid_body_bull | 0.021702 |
+| 10 | vol_zscore_20 | 0.021375 |
 
 
 ## Phase 4 handoff
 
-- **XGBoost test macro-F1: 0.6084** — this is the floor DL models must beat.
-- Bull F1 floor: 0.5519
-- Bear F1 floor: 0.5183
+- **XGBoost test macro-F1: 0.5890** — this is the floor DL models must beat.
+- Bull F1 floor: 0.5436
+- Bear F1 floor: 0.5031
 - Model saved at: checkpoints/xgboost/xgb_seed42.ubj
-- Naive baseline macro-F1: 0.2846 (delta to XGBoost: +0.3238)
+- Naive baseline macro-F1: 0.2852 (delta to XGBoost: +0.3038)
 
 Note on overlapping windows: stride=1 produces highly overlapping windows (59/60 shared bars between adjacent windows). This is standard for XGBoost tabular evaluation and matches the distribution DL models will train on. F1 is computed on a held-out temporal test split (2023-2024), so temporal leakage is not a concern despite overlap.

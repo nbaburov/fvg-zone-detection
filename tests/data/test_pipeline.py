@@ -77,7 +77,7 @@ def test_pipeline_returns_three_datasets_and_weights():
             with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
                 from src.data.pipeline import build_pipeline
                 train_ds, val_ds, test_ds, weights = build_pipeline(
-                    labeller_name="fvg",
+                    labeller_name="fvg_valid",
                     window_size=60,
                     
                 )
@@ -96,7 +96,7 @@ def test_class_weights_shape_and_sum():
         with patch("src.data.pipeline.build_labelled_dataset", return_value=full_df):
             with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
                 from src.data.pipeline import build_pipeline
-                _, _, _, weights = build_pipeline(labeller_name="fvg", window_size=60)
+                _, _, _, weights = build_pipeline(labeller_name="fvg_valid", window_size=60)
 
     assert weights.shape == (3,), f"Expected shape (3,), got {weights.shape}"
     assert abs(float(weights.sum()) - 3.0) < 0.01, f"weights.sum()={float(weights.sum())}, expected ≈ 3.0"
@@ -111,7 +111,7 @@ def test_no_candle_overlap_between_splits():
             with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
                 from src.data.pipeline import build_pipeline
                 # We test at DataFrame level (written parquets)
-                build_pipeline(labeller_name="fvg", window_size=60)
+                build_pipeline(labeller_name="fvg_valid", window_size=60)
 
                 train_df = pd.read_parquet(os.path.join(tmpdir, "spy_h1_train.parquet"))
                 val_df = pd.read_parquet(os.path.join(tmpdir, "spy_h1_val.parquet"))
@@ -133,7 +133,7 @@ def test_class_weights_json_written():
         with patch("src.data.pipeline.build_labelled_dataset", return_value=full_df):
             with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
                 from src.data.pipeline import build_pipeline
-                build_pipeline(labeller_name="fvg", window_size=60)
+                build_pipeline(labeller_name="fvg_valid", window_size=60)
 
         weights_path = os.path.join(tmpdir, "class_weights.json")
         assert os.path.exists(weights_path), "class_weights.json not written"
@@ -151,7 +151,7 @@ def test_train_stride1_val_test_stride60():
             with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
                 from src.data.pipeline import build_pipeline
                 train_ds, val_ds, test_ds, _ = build_pipeline(
-                    labeller_name="fvg", window_size=60                )
+                    labeller_name="fvg_valid", window_size=60                )
 
     # train should have many more windows than val/test (stride=1 vs stride=60)
     assert len(train_ds) > len(val_ds), (
