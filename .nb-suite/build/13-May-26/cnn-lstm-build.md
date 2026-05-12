@@ -78,6 +78,40 @@ Full suite: **284/284 pass** throughout.
 
 ---
 
+---
+
+## Post-sprint Polish — Task 1: No-dropout Squeeze (2026-05-13)
+
+**Experiment:** `experiments/cnn_lstm_g1_nodrop.yaml` — G1 HPs with `dropout=0.0`, `head_dropout=0.0`.
+
+**Command:**
+```
+.venv/bin/python scripts/rigor/multiseed_run.py \
+  --model cnn_lstm \
+  --config experiments/cnn_lstm_g1_nodrop.yaml \
+  --seeds 0 17 42 123 2024 \
+  --output-dir reports/rigor/2026-05-13/cnn_lstm_G1_nodrop_squeeze
+```
+
+**Results:**
+
+| seed | macro_f1 |
+|------|----------|
+| 0 | 0.5829 |
+| 17 | 0.6198 |
+| 42 | 0.6177 |
+| 123 | 0.6466 |
+| 2024 | 0.6033 |
+| **mean±std** | **0.6141 ± 0.0234** |
+
+**Canonical baseline:** 0.614 ± 0.021
+
+**Decision:** No promotion. Delta = +0.0001 — negligible, below 0.005 marginal threshold. Dropout does not appear to be over-regularizing at this model scale. Canonical `experiments/cnn_lstm_g1.yaml` and checkpoints unchanged.
+
+**Files touched:** `experiments/cnn_lstm_g1_nodrop.yaml` (created), `reports/rigor/2026-05-13/cnn_lstm_G1_nodrop_squeeze/` (results).
+
+---
+
 ## Open flags
 
 - Pool output length: with `use_pool=True, padding=0`, L=60 → 59 per pool layer. Two conv layers with pool → 58. LSTM handles variable T — not a correctness issue.

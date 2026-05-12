@@ -14,11 +14,12 @@ Individual semester project, Fontys ICT 3rd year. Deadlines through 2026-06-20.
 | Labellers (raw `FVGLabeller`, validated `ValidFVGLabeller`) | ✅ |
 | Gold annotation set (75 rows, κ = 1.0 vs raw `FVGLabeller`, κ = 0.89 vs `ValidFVGLabeller`) | ✅ |
 | XGBoost baseline (ValidFVG) | ✅ 5-seed mean macro F1 = **0.721** ± 0.001 |
+| CNN-LSTM (ValidFVG) | ✅ 5-seed mean macro F1 = **0.614** ± 0.021 |
 | LSTM baseline (ValidFVG) | ✅ 5-seed mean macro F1 = **0.599** ± 0.025 |
 | Inspector tool (offline metrics + TP/SL outcome sim) | ✅ |
 | Live paper-trading harness (Alpaca paper) | ✅ implemented, not yet run live |
-| CNN-LSTM / xLSTM / Transformer | planned |
-| Full rigor sprint (G1–G10, 10 gaps closed) | ✅ complete |
+| xLSTM / Transformer | planned |
+| Full rigor sprint (G1–G10, 10 gaps closed — all three models) | ✅ complete |
 
 See [`docs/models-status.md`](docs/models-status.md) for full results.
 
@@ -88,7 +89,7 @@ Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades 
 ```
 src/data/      acquisition, labelling, splitting, windowing
 src/features/  feature engineering for non-DL models
-src/models/    architectures (LSTM, XGBoost)
+src/models/    architectures (LSTM, CNN-LSTM, XGBoost)
 src/training/  loss, early stop, train utils
 src/inspect/   offline model inspection toolkit
 src/live/      live paper-trading harness

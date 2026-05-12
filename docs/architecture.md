@@ -34,8 +34,16 @@ smc-data-challenge/
 │   ├── features/                  # feature engineering for non-DL
 │   │   └── window_features.py     # 60×5 window → feature vector for XGBoost
 │   │
+│   ├── config/                    # Pydantic v2 experiment config + YAML loader
+│   │   ├── schema.py              # ExperimentConfig + nested model/train/data schemas
+│   │   ├── loader.py              # load_config() — merges _base.yaml + override YAML
+│   │   ├── registry.py            # ModelRegistry + LossRegistry (auto-discovered)
+│   │   ├── _model_registrations.py # registers lstm, cnn_lstm, xgboost
+│   │   └── _loss_registrations.py  # registers weighted_ce, focal
+│   │
 │   ├── models/                    # model architectures
-│   │   ├── lstm.py                # FVGLSTMClassifier (2-layer unidir, MPS-safe)
+│   │   ├── lstm.py                # FVGLSTMClassifier (2-layer unidir, CPU-only)
+│   │   ├── cnn_lstm.py            # FVGCNNLSTMClassifier (Conv1d → LSTM → FC, CPU-only)
 │   │   └── xgboost_baseline.py    # GBM hyperparameter defaults
 │   │
 │   ├── training/                  # loss + optim + early stop
@@ -53,6 +61,7 @@ smc-data-challenge/
 │   │   ├── report.py              # writes summary.md + HTML plots
 │   │   └── adapters/              # drop a file here = new model auto-discovered
 │   │       ├── lstm_adapter.py
+│   │       ├── cnn_lstm_adapter.py
 │   │       ├── xgboost_adapter.py
 │   │       └── _xgb_worker.py     # subprocess for Python 3.14+ segfault workaround
 │   │
@@ -72,15 +81,21 @@ smc-data-challenge/
 │   │   └── persist_labels.py      # deprecated — exits 0 with notice (labels now in spy_h1.parquet)
 │   ├── training/                  # model training
 │   │   ├── train_lstm.py          # train + save LSTM
-│   │   └── train_xgboost.py       # train + save XGBoost
+│   │   ├── train_cnn_lstm.py      # train + save CNN-LSTM
+│   │   ├── train_xgboost.py       # train + save XGBoost
+│   │   └── train.py               # generic YAML-driven trainer (all models)
 │   ├── rigor/                     # rigor sprint tools (tuning, analysis)
-│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation
+│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation (YAML-driven)
 │   │   ├── tune_lstm.py           # Optuna HP search for LSTM
 │   │   ├── tune_xgboost.py        # Optuna HP search for XGBoost
+│   │   ├── tune_cnn_lstm.py       # Optuna HP search for CNN-LSTM
 │   │   ├── threshold_sweep.py     # per-class F1-optimal thresholds
+│   │   ├── threshold_multiseed.py # threshold sweep across all 5 seeds
 │   │   ├── window_sweep.py        # window size sensitivity analysis
 │   │   ├── asymmetry_analysis.py  # bull vs bear asymmetry (Gap 6)
-│   │   ├── bootstrap_ci.py        # block bootstrap confidence intervals (Gap 10)
+│   │   ├── bootstrap_ci.py        # block bootstrap confidence intervals (Gap 10, single seed)
+│   │   ├── bootstrap_ci_multiseed.py # bootstrap CI aggregated over 5 seeds
+│   │   ├── naive_baselines.py     # majority-class + uniform-random baselines
 │   │   ├── shap_xgb.py            # SHAP feature importance (Gap 5)
 │   │   └── _workers/              # subprocess workers (Python 3.14 segfault workaround)
 │   │       ├── _xgb_sweep_worker.py
@@ -133,6 +148,7 @@ flowchart LR
 
     subgraph MOD["src/models/"]
         LS[lstm.py]
+        CL[cnn_lstm.py]
         XB[xgboost_baseline.py]
     end
 
@@ -148,7 +164,7 @@ flowchart LR
         ST[stats.py]
         OC[outcomes.py]
         VZ[viz.py]
-        AD["adapters/<br/>lstm + xgboost"]
+        AD["adapters/<br/>lstm + cnn_lstm + xgboost"]
     end
 
     subgraph LIV["src/live/"]
@@ -249,19 +265,25 @@ sequenceDiagram
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
 | `train_xgboost.py` | Train XGBoost on windowed features | `python scripts/training/train_xgboost.py` |
-| `train_lstm.py` | Train LSTM (MPS or CPU) | `python scripts/training/train_lstm.py` |
+| `train_lstm.py` | Train LSTM (CPU-only) | `python scripts/training/train_lstm.py` |
+| `train_cnn_lstm.py` | Train CNN-LSTM (CPU-only) | `python scripts/training/train_cnn_lstm.py` |
+| `train.py` | Generic YAML-driven trainer for any registered model | `python scripts/training/train.py --config experiments/cnn_lstm_g1.yaml` |
 
 ### Rigor sprint tools (`scripts/rigor/`)
 
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `multiseed_run.py` | Multi-seed training sweep with loss ablation | `python scripts/rigor/multiseed_run.py --model lstm --config <config.json> --seeds 42 17 0 123 2024 --loss weighted_ce` |
-| `tune_lstm.py` | Optuna hyperparameter search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
-| `tune_xgboost.py` | Optuna hyperparameter search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
-| `threshold_sweep.py` | Per-class F1-optimal threshold tuning | `python scripts/rigor/threshold_sweep.py --model-path <checkpoint> --model-type lstm` |
-| `window_sweep.py` | Window size sensitivity analysis | `python scripts/rigor/window_sweep.py --config <config.json> --windows 30 60 90 120` |
+| `multiseed_run.py` | Multi-seed training sweep (YAML-driven, any model) | `python scripts/rigor/multiseed_run.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --seeds 0 17 42 123 2024 --output-dir reports/rigor/<ts>/` |
+| `tune_lstm.py` | Optuna HP search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
+| `tune_xgboost.py` | Optuna HP search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
+| `tune_cnn_lstm.py` | Optuna HP search for CNN-LSTM | `python scripts/rigor/tune_cnn_lstm.py --n-trials 12 --timeout 3600` |
+| `threshold_sweep.py` | Per-class F1-optimal threshold tuning (single seed) | `python scripts/rigor/threshold_sweep.py --model-path <checkpoint> --model-type lstm` |
+| `threshold_multiseed.py` | Threshold sweep aggregated over 5 seeds | `python scripts/rigor/threshold_multiseed.py --config experiments/cnn_lstm_g1.yaml` |
+| `window_sweep.py` | Window size sensitivity analysis | `python scripts/rigor/window_sweep.py --config <config.yaml> --windows 30 60 90 120` |
 | `asymmetry_analysis.py` | Bull vs Bear FVG asymmetry analysis (Gap 6) | `python scripts/rigor/asymmetry_analysis.py --pred-dir reports/rigor/<ts>/` |
-| `bootstrap_ci.py` | Block bootstrap confidence intervals (Gap 10) | `python scripts/rigor/bootstrap_ci.py --predictions <preds.npz>` |
+| `bootstrap_ci.py` | Block bootstrap CI (single-seed predictions) | `python scripts/rigor/bootstrap_ci.py --predictions <preds.npz>` |
+| `bootstrap_ci_multiseed.py` | Block bootstrap CI aggregated over 5 seeds | `python scripts/rigor/bootstrap_ci_multiseed.py --config experiments/cnn_lstm_g1.yaml` |
+| `naive_baselines.py` | Majority-class and uniform-random baselines | `python scripts/rigor/naive_baselines.py` |
 | `shap_xgb.py` | SHAP feature importance analysis (Gap 5) | `python scripts/rigor/shap_xgb.py --checkpoint <model.ubj>` |
 
 ### Main CLIs (`scripts/`)
@@ -277,7 +299,7 @@ sequenceDiagram
 |------|------------|---------|
 | `alpaca-py` | `src/data/download.py`, `src/live/stream.py`, `src/live/execution.py` | Historical 1-min bars + live WebSocket + paper bracket orders |
 | `exchange_calendars` | `src/data/process.py`, `src/live/window_builder.py` | NYSE schedule, half-day + holiday detection |
-| `torch` | `src/models/lstm.py`, `src/inspect/adapters/lstm_adapter.py` | LSTM training + inference |
+| `torch` | `src/models/lstm.py`, `src/models/cnn_lstm.py`, `src/inspect/adapters/lstm_adapter.py`, `src/inspect/adapters/cnn_lstm_adapter.py` | LSTM + CNN-LSTM training + inference |
 | `xgboost` | `src/models/xgboost_baseline.py`, `src/inspect/adapters/_xgb_worker.py` | Gradient boosting baseline |
 | `plotly` | `src/data/annotate.py`, `src/inspect/viz.py` | Candlestick visualisation |
 | `sklearn` | `src/inspect/stats.py`, `scripts/training/train_xgboost.py` | F1, confusion, train utils |

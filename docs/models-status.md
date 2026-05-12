@@ -74,7 +74,7 @@ Used by `WeightedCE` in `src/training/loss.py`. No oversampling.
 | Loss | WeightedCE (inverse-freq weights) |
 | Optimiser | Adam, lr 7.31e-4, weight_decay 7.48e-6 |
 | Early stop | Val Macro-F1, patience 15 |
-| Device | MPS (Apple Silicon, per seed_sweep default) |
+| Device | CPU (MPS disabled — same kernel bug as LSTM) |
 | Seed | 42 |
 | Trained | 2026-05-13 |
 | HP source | Optuna G1 (6 complete / 12 trials, 60min cap, best val F1 0.6440) |
