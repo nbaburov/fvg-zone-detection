@@ -24,7 +24,7 @@ from src.training.train_utils import set_seed, log_run_metadata
 
 @dataclass
 class SeedSweepConfig:
-    model_type: Literal["lstm", "xgb"]
+    model_type: Literal["lstm", "xgb", "cnn_lstm"]
     hyperparams: dict[str, Any]
     seeds: list[int]
     loss_type: Literal["weighted_ce", "focal"] = "weighted_ce"
@@ -92,7 +92,7 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
         ckpt_dir = config.checkpoint_dir / config.model_type
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        if config.model_type == "lstm":
+        if config.model_type in ("lstm", "cnn_lstm"):
             ckpt_path = ckpt_dir / f"{ckpt_name}.pt"
             meta_path = ckpt_dir / f"{ckpt_name}.meta.json"
         else:
@@ -118,6 +118,8 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
 
         if config.model_type == "lstm":
             result = _train_lstm(config, seed, ckpt_path, meta_path)
+        elif config.model_type == "cnn_lstm":
+            result = _train_cnn_lstm(config, seed, ckpt_path, meta_path)
         else:
             result = _train_xgb(config, seed, ckpt_path, meta_path)
 
@@ -241,6 +243,125 @@ def _train_lstm(
         "optuna_study": None,
         "optuna_trial_number": None,
         "threshold_config": None,
+    }
+    with meta_path.open("w") as fh:
+        json.dump(meta, fh, indent=2)
+
+    return {
+        "test_macro_f1": test_macro_f1,
+        "test_per_class_f1": test_per_class_f1,
+        "y_true": y_true,
+        "y_pred": y_pred,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CNN-LSTM training
+# ---------------------------------------------------------------------------
+
+def _train_cnn_lstm(
+    config: SeedSweepConfig,
+    seed: int,
+    ckpt_path: Path,
+    meta_path: Path,
+) -> dict[str, Any]:
+    from src.data.labels import LABELLERS
+    from src.data.window import SMCWindowDataset
+    from src.models.cnn_lstm import FVGCNNLSTMClassifier
+    from src.training.early_stop import EarlyStop
+    from src.training.loss import FocalLoss, WeightedCE
+
+    set_seed(seed)
+    device = _get_device()
+
+    train_df, val_df, test_df = _load_splits(config.data_dir)
+    labeller = LABELLERS["fvg_valid"]()
+
+    hp = config.hyperparams
+    window_size = int(hp.get("window_size", 60))
+    batch_size = int(hp.get("batch_size", 16))
+
+    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size,
+                                drop_cross_session_windows=False)
+    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size,
+                              drop_cross_session_windows=False)
+    test_ds = SMCWindowDataset(test_df, labeller, stride=1, window_size=window_size,
+                               drop_cross_session_windows=False)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
+
+    weights = _load_class_weights(config.data_dir)
+    weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
+
+    n_conv_layers = int(hp.get("n_conv_layers", 2))
+    dropout_val = float(hp.get("dropout", 0.318)) if not config.ablation_no_dropout else 0.0
+    head_dropout_val = float(hp.get("head_dropout", 0.526)) if not config.ablation_no_dropout else 0.0
+
+    model = FVGCNNLSTMClassifier(
+        conv_filters=int(hp.get("conv_filters", 32)),
+        kernel_size=int(hp.get("kernel_size", 3)),
+        n_conv_layers=n_conv_layers,
+        use_pool=bool(hp.get("use_pool", False)),
+        pool_type=str(hp.get("pool_type", "max")),
+        lstm_hidden=int(hp.get("lstm_hidden", 64)),
+        lstm_layers=int(hp.get("lstm_layers", 1)),
+        dropout=dropout_val,
+        head_dropout=head_dropout_val,
+    ).to(device)
+
+    if config.loss_type == "focal":
+        criterion = FocalLoss(class_weights=weights_tensor, gamma=config.focal_gamma)
+    else:
+        criterion = WeightedCE(weights_tensor)
+
+    lr = float(hp.get("lr", 5.3e-4))
+    weight_decay = 0.0 if config.ablation_no_l2 else float(hp.get("weight_decay", 3.92e-5))
+    optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    early_stop = EarlyStop(patience=15, mode="max")
+
+    best_val_f1 = 0.0
+    best_state: dict | None = None
+    best_epoch = 0
+
+    for epoch in range(100):
+        model.train()
+        for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device)
+            y_batch = torch.as_tensor(y_batch, device=device)
+            optimiser.zero_grad()
+            logits = model(x_batch)
+            loss = criterion(logits, y_batch)
+            loss.backward()
+            optimiser.step()
+
+        val_f1, _, _ = _eval_f1_all(model, val_loader, device)
+
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_epoch = epoch
+
+        if early_stop.update(val_f1):
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    test_macro_f1, test_per_class_f1, (y_true, y_pred) = _eval_f1_all(model, test_loader, device)
+    torch.save(model.state_dict(), ckpt_path)
+
+    meta = {
+        **log_run_metadata(seed, device),
+        "best_epoch": best_epoch,
+        "best_val_macro_f1": best_val_f1,
+        "test_macro_f1": test_macro_f1,
+        "test_per_class_f1": test_per_class_f1,
+        "hyperparams": config.hyperparams,
+        "loss_type": config.loss_type,
+        "focal_gamma": config.focal_gamma if config.loss_type == "focal" else None,
+        "arch": "cnn_lstm",
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)

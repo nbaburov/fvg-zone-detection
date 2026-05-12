@@ -1,0 +1,29 @@
+# cnn_lstm_base.yaml — baseline config for CNN-LSTM smoke + G1 HP search starting point.
+# Defaults from research doc. HP will be overridden by Optuna in tune_cnn_lstm.py.
+# Pool: use_pool=false (default). If use_pool=true, stride=1 preserves sequence length.
+name: cnn_lstm_base_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: cnn_lstm
+  n_conv_layers: 2
+  conv_filters: 32
+  kernel_size: 3
+  use_pool: false
+  pool_type: "max"
+  lstm_hidden: 64
+  lstm_layers: 1
+  dropout: 0.318
+  head_dropout: 0.526
+train:
+  seeds: [42]
+  batch_size: 16
+  lr: 5.3e-4
+  weight_decay: 3.92e-5
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

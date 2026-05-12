@@ -39,8 +39,21 @@ class XGBModelConfig(BaseModel):
     colsample_bytree: float = 0.725
 
 
+class CNNLSTMModelConfig(BaseModel):
+    arch: Literal["cnn_lstm"] = "cnn_lstm"
+    n_conv_layers: int = 2
+    conv_filters: int = 32
+    kernel_size: int = 3
+    use_pool: bool = False
+    pool_type: str = "max"       # "max" | "avg" — only used if use_pool=True
+    lstm_hidden: int = 64
+    lstm_layers: int = 1
+    dropout: float = 0.318       # between LSTM layers (active only if lstm_layers > 1)
+    head_dropout: float = 0.526
+
+
 ModelConfig = Annotated[
-    LSTMModelConfig | XGBModelConfig,
+    LSTMModelConfig | XGBModelConfig | CNNLSTMModelConfig,
     Field(discriminator="arch"),
 ]
 

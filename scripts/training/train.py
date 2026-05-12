@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import ExperimentConfig, load_experiment
-from src.config.schema import LSTMModelConfig, XGBModelConfig
+from src.config.schema import CNNLSTMModelConfig, LSTMModelConfig, XGBModelConfig
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +389,218 @@ def _lstm_train_loop(
 
 
 # ---------------------------------------------------------------------------
+# CNN-LSTM dispatch
+# ---------------------------------------------------------------------------
+
+def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
+    """Train CNN-LSTM with config-driven HP. CPU only — same MPS constraint as LSTM."""
+    import random
+
+    import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
+
+    from src.config.registry import LOSSES, MODELS
+    from src.data.labels import LABELLERS
+    from src.data.window import SMCWindowDataset
+    from src.training.early_stop import EarlyStop
+    from src.training.train_utils import eval_epoch, log_run_metadata, set_seed
+
+    assert isinstance(cfg.model, CNNLSTMModelConfig), \
+        f"Expected CNNLSTMModelConfig, got {type(cfg.model)}"
+
+    set_seed(seed)
+    device = torch.device("cpu")  # MPS LSTM gradient kernel broken on Apple Silicon — CPU only
+    print(f"Device: {device} (forced — MPS LSTM bug, see CLAUDE.md)")
+
+    metadata = log_run_metadata(seed, device)
+    metadata["device"] = "cpu (forced — MPS LSTM bug)"
+    metadata["config"] = cfg.name
+
+    # --- Data ---
+    label_key = cfg.data.labeller
+    labeller = LABELLERS[label_key]()
+
+    data_dir = Path(cfg.data.data_dir)
+    splits = cfg.data.splits
+
+    if splits == "legacy":
+        from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
+        import pandas as pd
+        labeled_df = pd.read_parquet(data_dir / "spy_h1_labeled.parquet")
+        tmp = LABELLERS[label_key]()
+        labeled_df = labeled_df.copy()
+        labeled_df["label"] = tmp.label(labeled_df).map(tmp.encoded_map).astype(int)
+        train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
+    elif splits == "default":
+        import pandas as pd
+        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+    else:
+        import pandas as pd
+        splits_dir = Path(splits)
+        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        print(f"  Using custom splits dir: {splits_dir}")
+
+    if debug:
+        train_df = train_df.iloc[:260]
+        val_df   = val_df.iloc[:130]
+        print(f"[DEBUG] Subset: train={len(train_df)} rows, val={len(val_df)} rows")
+
+    w = cfg.data.window_size
+    _drop_cs = cfg.data.drop_cross_session
+    train_ds = SMCWindowDataset(train_df, labeller, stride=cfg.data.stride, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    val_ds   = SMCWindowDataset(val_df,   labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    test_ds  = SMCWindowDataset(test_df,  labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    print(f"Windows — train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}")
+
+    def seed_worker(worker_id: int) -> None:
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    g = torch.Generator()
+    g.manual_seed(seed)
+    train_loader = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True,
+                              num_workers=0, worker_init_fn=seed_worker, generator=g)
+    val_loader   = DataLoader(val_ds,   batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+    test_loader  = DataLoader(test_ds,  batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+
+    # --- Class weights ---
+    cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    with open(cw_dir / cw_file) as f:
+        cw = json.load(f)
+    class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
+    print(f"Class weights: {class_weights}")
+
+    # --- Model ---
+    m = cfg.model
+    dropout   = 0.0 if cfg.train.ablation_no_dropout else m.dropout
+    head_drop = 0.0 if cfg.train.ablation_no_dropout else m.head_dropout
+
+    model = MODELS["cnn_lstm"](
+        conv_filters=m.conv_filters,
+        kernel_size=m.kernel_size,
+        n_conv_layers=m.n_conv_layers,
+        use_pool=m.use_pool,
+        pool_type=m.pool_type,
+        lstm_hidden=m.lstm_hidden,
+        lstm_layers=m.lstm_layers,
+        dropout=dropout,
+        head_dropout=head_drop,
+    ).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {n_params:,}")
+
+    # --- Loss ---
+    loss_cls = LOSSES[cfg.train.loss]
+    criterion = loss_cls(class_weights, gamma=cfg.train.focal_gamma) \
+        if cfg.train.loss == "focal" else loss_cls(class_weights)
+
+    # --- Optimiser ---
+    wd = 0.0 if cfg.train.ablation_no_l2 else cfg.train.weight_decay
+    if cfg.train.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+
+    # --- Scheduler ---
+    max_epochs = 5 if debug else cfg.train.max_epochs
+    if cfg.train.scheduler == "onecycle":
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=cfg.train.lr,
+            total_steps=max_epochs * len(train_loader),
+        )
+    else:
+        scheduler = None
+
+    # --- Checkpoint path: cnn_lstm_seed{N}{label_tag}.pt ---
+    label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "cnn_lstm"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = ckpt_dir / f"cnn_lstm_seed{seed}{label_tag}.pt"
+
+    early_stop = EarlyStop(
+        patience=cfg.train.patience,
+        min_delta=1e-4,
+        ema_alpha=cfg.train.ema_alpha,
+        mode="max",
+    )
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    log_csv = log_dir / f"cnn_lstm_seed{seed}{label_tag}.csv"
+
+    epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        device=device,
+        ckpt_path=ckpt_path,
+        max_epochs=max_epochs,
+        log_path=log_csv,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        early_stop=early_stop,
+        max_grad_norm=cfg.train.max_grad_norm,
+        window_size=w,
+    )
+
+    # Load best checkpoint
+    if ckpt_path.exists():
+        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+        print(f"Loaded best checkpoint: {ckpt_path}")
+
+    # Eval
+    val_metrics  = eval_epoch(model, val_loader,  criterion, device)
+    test_metrics = eval_epoch(model, test_loader, criterion, device)
+
+    from sklearn.metrics import classification_report
+    print("\n=== TEST RESULTS ===")
+    print(classification_report(
+        test_metrics["y_true"], test_metrics["y_pred"],
+        target_names=["none", "bull", "bear"], digits=4, zero_division=0,
+    ))
+    print(f"Test macro-F1: {test_metrics['macro_f1']:.4f}")
+
+    # Meta sidecar
+    nan_detected = any(np.isnan(r["val_macro_f1"]) for r in epoch_logs)
+    meta_path = ckpt_dir / f"cnn_lstm_seed{seed}{label_tag}.meta.json"
+    with open(meta_path, "w") as f:
+        json.dump({
+            **metadata,
+            "config": cfg.name,
+            "label": label_key,
+            "splits": splits,
+            "best_epoch": best_epoch,
+            "best_smoothed_val_macro_f1": best_f1,
+            "test_macro_f1": test_metrics["macro_f1"],
+            "test_bull_f1": (test_metrics["per_class_f1"][1]
+                             if len(test_metrics["per_class_f1"]) > 1 else 0.0),
+            "test_bear_f1": (test_metrics["per_class_f1"][2]
+                             if len(test_metrics["per_class_f1"]) > 2 else 0.0),
+            "nan_detected": nan_detected,
+            "n_params": n_params,
+            "arch": "cnn_lstm",
+            "conv_filters": m.conv_filters,
+            "kernel_size": m.kernel_size,
+            "n_conv_layers": m.n_conv_layers,
+            "use_pool": m.use_pool,
+            "lstm_hidden": m.lstm_hidden,
+            "lstm_layers": m.lstm_layers,
+        }, f, indent=2)
+    print(f"Metadata saved: {meta_path}")
+
+
+# ---------------------------------------------------------------------------
 # XGB dispatch
 # ---------------------------------------------------------------------------
 
@@ -443,6 +655,8 @@ def main(default_config: str | None = None) -> None:
             _train_lstm(cfg, seed, debug=args.debug)
         elif cfg.model.arch == "xgb":
             _train_xgb(cfg, seed, debug=args.debug)
+        elif cfg.model.arch == "cnn_lstm":
+            _train_cnn_lstm(cfg, seed, debug=args.debug)
         else:
             raise ValueError(f"Unknown arch: {cfg.model.arch!r}")
 

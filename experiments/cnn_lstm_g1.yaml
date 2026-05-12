@@ -1,0 +1,29 @@
+# cnn_lstm_g1.yaml — G1 Optuna best HP for CNN-LSTM on ValidFVG target.
+# HP source: reports/rigor/2026-05-13/cnn_lstm_G1/best_hp_cnn_lstm.json
+# PLACEHOLDER — populated by tune_cnn_lstm.py after G1 completes.
+name: cnn_lstm_g1_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: cnn_lstm
+  n_conv_layers: 2          # TBD from G1
+  conv_filters: 32          # TBD from G1
+  kernel_size: 3            # TBD from G1
+  use_pool: false           # TBD from G1
+  pool_type: "max"
+  lstm_hidden: 64           # TBD from G1
+  lstm_layers: 1            # TBD from G1
+  dropout: 0.318            # TBD from G1
+  head_dropout: 0.526       # TBD from G1
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16            # TBD from G1
+  lr: 5.3e-4                # TBD from G1
+  weight_decay: 3.92e-5     # TBD from G1
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

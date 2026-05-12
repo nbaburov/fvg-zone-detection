@@ -8,6 +8,7 @@ Public API:
 """
 
 from src.config.schema import (
+    CNNLSTMModelConfig,
     DataConfig,
     EvalConfig,
     ExperimentConfig,
@@ -25,6 +26,7 @@ __all__ = [
     "DataConfig",
     "LSTMModelConfig",
     "XGBModelConfig",
+    "CNNLSTMModelConfig",
     "ModelConfig",
     "TrainConfig",
     "EvalConfig",
