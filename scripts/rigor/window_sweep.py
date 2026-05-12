@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--windows", nargs="+", type=int, default=[30, 60, 90, 120])
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed"))
     args = parser.parse_args()
@@ -96,7 +97,7 @@ def main() -> None:
         lr = float(hp.get("lr", 1e-3))
         wd = float(hp.get("weight_decay", 1e-4))
         optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
-        early_stop = EarlyStop(patience=15, mode="max")
+        early_stop = EarlyStop(patience=args.patience, mode="max")
 
         best_val_f1 = 0.0
         best_state = None

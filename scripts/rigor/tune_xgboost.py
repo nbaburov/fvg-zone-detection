@@ -124,7 +124,7 @@ def _write_xgb_tune_worker(path: Path) -> None:
         "from pathlib import Path\n"
         "import numpy as np\n"
         "\n"
-        "ROOT = Path(__file__).resolve().parent.parent\n"
+        "ROOT = Path(__file__).resolve().parent.parent.parent.parent\n"
         "sys.path.insert(0, str(ROOT))\n"
         "\n"
         "def main() -> None:\n"

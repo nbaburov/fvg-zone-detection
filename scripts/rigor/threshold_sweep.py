@@ -47,6 +47,8 @@ def main() -> None:
         val_proba, val_true, test_proba, test_true = _get_xgb_probas(model_path, data_dir)
 
     # Compute PR curves on val (not test)
+    assert val_proba is not test_proba, "LOOKAHEAD: thresholds must be tuned on val, not test"
+    assert not np.array_equal(val_true, test_true), "LOOKAHEAD: val and test labels are identical — wrong split"
     curves = compute_pr_curves(val_true, val_proba)
 
     optimal_thresholds: dict[int, float] = {}

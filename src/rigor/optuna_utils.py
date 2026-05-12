@@ -58,7 +58,7 @@ class LSTMObjective:
 
         # Sample hyperparameters
         hidden_size = trial.suggest_categorical("hidden_size", [32, 64, 128])
-        num_layers = trial.suggest_categorical("num_layers", [1, 2, 3])
+        num_layers = trial.suggest_categorical("num_layers", [1, 2])
         dropout = trial.suggest_float("dropout", 0.1, 0.5)
         head_dropout = trial.suggest_float("head_dropout", 0.1, 0.6)
         lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
@@ -231,11 +231,14 @@ def run_study(
     n_remaining = max(0, n_trials - n_done)
 
     if n_remaining > 0:
+        # timeout here is per-trial budget in seconds; total budget = n_remaining * timeout.
+        # Pass None to disable total timeout and rely solely on n_trials count.
+        # Individual trial runtime is bounded by max_epochs * epoch_time.
         study.optimize(
             objective,
             n_trials=n_remaining,
             show_progress_bar=True,
-            timeout=timeout,   # 5 min per trial max — prevents CPU/process hang
+            timeout=None,      # no total wall-clock limit; rely on n_trials count
             n_jobs=1,          # always serial (XGB subprocess safety + MPS thread-safety)
         )
     else:

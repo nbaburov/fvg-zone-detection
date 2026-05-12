@@ -84,6 +84,8 @@ def main() -> None:
         output_dir=ts_dir,
         checkpoint_dir=ROOT / args.checkpoint_dir,
         data_dir=ROOT / args.data_dir,
+        ablation_no_dropout=args.no_dropout,
+        ablation_no_l2=args.no_l2,
     )
 
     # For XGBoost, run in subprocess to avoid Python 3.14 segfault

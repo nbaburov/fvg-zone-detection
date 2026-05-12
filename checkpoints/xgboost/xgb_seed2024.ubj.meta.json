@@ -1,0 +1,24 @@
+{
+  "seed": 2024,
+  "test_macro_f1": 0.7207068547118789,
+  "test_per_class_f1": [
+    0.9824455813020363,
+    0.5914396887159533,
+    0.5882352941176471
+  ],
+  "hyperparams": {
+    "n_estimators": 513,
+    "max_depth": 4,
+    "learning_rate": 0.1311447837531049,
+    "min_child_weight": 1,
+    "subsample": 0.826439213403869,
+    "colsample_bytree": 0.7249466284356196,
+    "best_value": 0.6908325082756889,
+    "n_complete": 50
+  },
+  "loss_type": "weighted_ce",
+  "n_estimators_used": 512,
+  "optuna_study": null,
+  "optuna_trial_number": null,
+  "threshold_config": null
+}

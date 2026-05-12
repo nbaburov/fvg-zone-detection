@@ -9,7 +9,17 @@ import pandas as pd
 
 
 def timestamped_dir(base: Path) -> Path:
-    """Create and return base/<YYYY-MM-DD_HHMMSS>/."""
+    """Create and return base/<YYYY-MM-DD_HHMMSS>/.
+
+    If env var NB_EXACT_OUTDIR is set, use that path directly (no timestamp
+    subfolder). Used by the rigor gap orchestrator to write to canonical paths.
+    """
+    import os
+    exact = os.environ.get("NB_EXACT_OUTDIR", "").strip()
+    if exact:
+        out = Path(exact)
+        out.mkdir(parents=True, exist_ok=True)
+        return out
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
     out = base / ts
     out.mkdir(parents=True, exist_ok=True)

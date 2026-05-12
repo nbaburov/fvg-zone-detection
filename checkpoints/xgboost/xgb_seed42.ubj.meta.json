@@ -1,27 +1,24 @@
 {
-  "params": {
-    "n_estimators": 300,
+  "seed": 42,
+  "test_macro_f1": 0.721708126581225,
+  "test_per_class_f1": [
+    0.9824385348720521,
+    0.6046511627906976,
+    0.5780346820809249
+  ],
+  "hyperparams": {
+    "n_estimators": 513,
     "max_depth": 4,
-    "learning_rate": 0.05,
-    "min_child_weight": 5,
-    "subsample": 0.8,
-    "colsample_bytree": 0.8,
-    "objective": "multi:softprob",
-    "num_class": 3,
-    "eval_metric": [
-      "mlogloss",
-      "merror"
-    ],
-    "random_state": 42,
-    "n_jobs": -1,
-    "tree_method": "hist",
-    "early_stopping_rounds": 30
+    "learning_rate": 0.1311447837531049,
+    "min_child_weight": 1,
+    "subsample": 0.826439213403869,
+    "colsample_bytree": 0.7249466284356196,
+    "best_value": 0.6908325082756889,
+    "n_complete": 50
   },
-  "early_stopping_rounds": 30,
-  "n_estimators_used": 33,
-  "git_sha": "4f64f03",
-  "python_version": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
-  "xgboost_version": "3.2.0",
-  "timestamp": "2026-05-12T10:54:57.416868+00:00",
-  "platform": "macOS-26.3.1-arm64-arm-64bit"
+  "loss_type": "weighted_ce",
+  "n_estimators_used": 512,
+  "optuna_study": null,
+  "optuna_trial_number": null,
+  "threshold_config": null
 }

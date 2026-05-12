@@ -32,6 +32,9 @@ class SeedSweepConfig:
     output_dir: Path = field(default_factory=lambda: Path("reports/rigor"))
     checkpoint_dir: Path = field(default_factory=lambda: Path("checkpoints"))
     data_dir: Path = field(default_factory=lambda: Path("data/processed"))
+    # Regularisation ablation flags (G9) — affect checkpoint name to avoid cache collisions
+    ablation_no_dropout: bool = False
+    ablation_no_l2: bool = False
 
     def __post_init__(self) -> None:
         self.output_dir = Path(self.output_dir)
@@ -361,7 +364,15 @@ def _eval_f1_all(
 def _checkpoint_name(config: SeedSweepConfig, seed: int) -> str:
     if config.loss_type == "focal":
         return f"{config.model_type}_focal_g{config.focal_gamma:.0f}_seed{seed}"
-    return f"{config.model_type}_seed{seed}"
+    name = f"{config.model_type}_seed{seed}"
+    # Ablation suffix — ensures no cache collision with G2 control checkpoints
+    if config.ablation_no_dropout and config.ablation_no_l2:
+        name += "_no_reg"
+    elif config.ablation_no_dropout:
+        name += "_no_dropout"
+    elif config.ablation_no_l2:
+        name += "_no_l2"
+    return name
 
 
 def _save_predictions(
