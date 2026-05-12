@@ -75,3 +75,63 @@ Not started. Awaiting Phase 1 approval.
 ## Phase 3 — Inspect + paper_trade verification (pending)
 
 Not started.
+
+---
+
+## Phase 2 — Rigor scripts + seed_sweep adapter
+
+**Completed:** 2026-05-12
+
+### Files modified
+- `src/rigor/seed_sweep.py` — Added `from_experiment_config(cfg, output_dir=None, checkpoint_dir=None)` classmethod. Maps `cfg.model.__dict__` (minus `arch`) + `cfg.train.{batch_size,lr,weight_decay}` into `hyperparams` dict.
+- `src/config/loader.py` — Added `parse_set_args(set_args)` helper. Parses `"key=value"` strings using `yaml.safe_load` for type coercion.
+- `src/config/__init__.py` — Exported `parse_set_args`.
+- `scripts/rigor/multiseed_run.py` — Full migration. Detects YAML vs JSON by extension. YAML path uses `load_experiment` + `parse_set_args` + `SeedSweepConfig.from_experiment_config`. Legacy JSON path unchanged. `--seeds`, `--loss`, `--gamma` kept as deprecated legacy flags with `DeprecationWarning`.
+- `scripts/rigor/window_sweep.py` — `--config` YAML path uses `load_experiment`, extracts `seed`, `patience`, `hp` from cfg. Legacy JSON path unchanged. `--seed`, `--patience` deprecated.
+- `scripts/rigor/tune_lstm.py` — Optional `--config` flag. When provided, sets `data_dir`, `window_size`, `labeller_key`, `output_dir` from cfg. Falls back to hardcoded defaults when absent.
+- `scripts/rigor/tune_xgboost.py` — Same pattern as tune_lstm. Optional `--config`.
+- `scripts/rigor/threshold_sweep.py` — Optional `--config`. Sources `data_dir`, `output_dir` from cfg.
+- `scripts/rigor/threshold_multiseed.py` — Optional `--config`. Sources `checkpoint_dir`, `data_dir`, `seeds` from cfg. `--seeds` kept as deprecated legacy.
+- `scripts/rigor/shap_xgb.py` — Optional `--config` (YAML or JSON). When YAML, loads `cfg` for `data_dir`, `output_dir`. Passes resolved config path to subprocess worker for pruned retrain.
+- `scripts/rigor/bootstrap_ci_multiseed.py` — Optional `--config`. Sources `block_size`, `n_iter` from `cfg.eval.*`. CLI `--block-size`/`--n-iter` take precedence.
+
+### Smoke test result
+```
+python scripts/rigor/multiseed_run.py --model lstm --config experiments/lstm_g1.yaml \
+  --set "train.seeds=[42]" --output-dir reports/rigor/2026-05-13/G2_smoke
+
+Seed 42: F1=0.5961 (cached from existing checkpoint)
+Canonical checkpoints/lstm/lstm_seed42.pt NOT overwritten (timestamp unchanged)
+```
+
+### Tests
+- 280/280 pass (up from 277 — 3 new tests for `from_experiment_config`)
+- New tests in `tests/rigor/test_seed_sweep.py`:
+  - `test_from_experiment_config_lstm`
+  - `test_from_experiment_config_output_dir_override`
+  - `test_from_experiment_config_xgb`
+
+---
+
+## Phase 3 — Inspect + paper_trade verification
+
+**Completed:** 2026-05-12
+
+### Files modified
+- `scripts/paper_trade.py` — Added optional `--config YAML_PATH` and `--set key=value` arguments. No behavioral change when not provided. Existing `--dry-run` flag unchanged.
+
+### Verification
+- `inspect_models.py --models lstm xgboost --lookahead-bars 20` — PASS. Both adapters load via existing meta.json-driven registry.
+- `paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001 --dry-run` — Fails at Alpaca stream connect (expected without API keys). Adapter loads fine, session logger runs, dry-run flag recognized.
+- `make test` — 280/280 pass.
+
+### Observations
+- `tune_lstm.py` / `tune_xgboost.py` keep `--config` optional because tuning searches HP space — there is no single "base config" of HP to load. Config is useful for sourcing `data_dir`, `window_size`, `labeller`.
+- `shap_xgb.py` already had `--config` for pruned retrain; migrated to accept YAML too, falling back to JSON path for legacy.
+- `bootstrap_ci_multiseed.py` had hardcoded `block_size` and `n_iter` in variable re-use — fixed by resolving config-vs-CLI at the top and using resolved variables throughout.
+
+### Open flags
+- None. All 8 rigor scripts migrated. All gates passed.
+
+### Next steps
+- CNN-LSTM: add `CNNLSTMModelConfig` to `src/config/schema.py` discriminated union, add `@register_model("cnn_lstm")` in `_model_registrations.py`. No experiment YAML changes until HP search completes.

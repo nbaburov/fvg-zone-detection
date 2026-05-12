@@ -30,15 +30,30 @@ sys.path.insert(0, str(ROOT))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Optuna HP search for XGBoost FVG classifier")
+    parser.add_argument("--config", type=Path, default=None,
+                        help="Path to experiments/foo.yaml (optional — sets data_dir etc.)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "data.data_dir=data/processed"')
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--study-name", type=str, default="xgb_fvg")
-    parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
+
+    # Resolve config (optional)
+    cfg = None
+    if args.config is not None:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        cfg = load_experiment(config_path, overrides or None)
 
     from src.features.window_features import extract_window_features
     from src.rigor.report_utils import timestamped_dir
 
-    data_dir = ROOT / "data" / "processed"
+    data_dir = ROOT / (cfg.data.data_dir if cfg else Path("data/processed"))
 
     # Load train + val feature matrices (no test)
     import pandas as pd
@@ -54,7 +69,8 @@ def main() -> None:
     weights_arr = [float(cw[str(i)]) for i in range(3)]
     sample_weight = np.array([weights_arr[int(y)] for y in y_train], dtype=np.float32)
 
-    ts_dir = timestamped_dir(ROOT / args.output_dir)
+    output_dir = args.output_dir or (cfg.runtime.output_dir if cfg else Path("reports/rigor"))
+    ts_dir = timestamped_dir(ROOT / output_dir)
     ckpt_dir = ROOT / "checkpoints" / "xgboost"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 

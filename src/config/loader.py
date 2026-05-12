@@ -87,3 +87,26 @@ def _set_nested(d: dict, keys: list[str], val: Any) -> None:
     for k in keys[:-1]:
         d = d.setdefault(k, {})
     d[keys[-1]] = val
+
+
+def parse_set_args(set_args: list[str]) -> dict[str, Any]:
+    """Parse --set key=value strings into an overrides dict.
+
+    Values are parsed with yaml.safe_load for type coercion:
+      "train.seeds=[42]"         → {"train.seeds": [42]}
+      "model.hidden_size=256"    → {"model.hidden_size": 256}
+      "data.labeller=fvg_valid"  → {"data.labeller": "fvg_valid"}
+
+    Args:
+        set_args: list of "key=value" strings from argparse nargs.
+
+    Returns:
+        Dict mapping dotted key paths to coerced Python values.
+    """
+    result: dict[str, Any] = {}
+    for item in set_args or []:
+        if "=" not in item:
+            raise ValueError(f"--set argument must be key=value, got: {item!r}")
+        key, _, raw_val = item.partition("=")
+        result[key.strip()] = yaml.safe_load(raw_val.strip())
+    return result

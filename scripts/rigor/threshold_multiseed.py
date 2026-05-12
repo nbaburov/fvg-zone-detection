@@ -50,14 +50,46 @@ def get_lstm_probas(model_path: Path, df, labeller, device):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/lstm"))
-    parser.add_argument("--data-dir", type=Path, default=Path("data/processed"))
+    parser.add_argument("--config", type=Path, default=None,
+                        help="Path to experiments/foo.yaml (optional — sets data_dir, seeds, checkpoint_dir)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "train.seeds=[42]"')
+    parser.add_argument("--checkpoint-dir", type=Path, default=None)
+    parser.add_argument("--data-dir", type=Path, default=None)
     parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--seeds", nargs="+", type=int, default=[0, 17, 42, 123, 2024])
+    # Legacy seeds flag
+    parser.add_argument("--seeds", nargs="+", type=int, default=None,
+                        help="[Legacy] seed list. Use --set 'train.seeds=[...]' with YAML config.")
     args = parser.parse_args()
 
-    ckpt_dir = ROOT / args.checkpoint_dir
-    data_dir = ROOT / args.data_dir
+    # Resolve config (optional)
+    cfg = None
+    if args.config is not None:
+        import warnings
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        if args.seeds is not None:
+            warnings.warn(
+                "--seeds is deprecated when using YAML config. "
+                "Use --set 'train.seeds=[...]' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            overrides.setdefault("train.seeds", args.seeds)
+        cfg = load_experiment(config_path, overrides or None)
+
+    checkpoint_dir = args.checkpoint_dir or (
+        Path(cfg.runtime.checkpoint_dir) / "lstm" if cfg else Path("checkpoints/lstm")
+    )
+    data_dir_path = args.data_dir or (cfg.data.data_dir if cfg else Path("data/processed"))
+    seeds = (cfg.train.seeds if cfg else None) or args.seeds or [0, 17, 42, 123, 2024]
+
+    ckpt_dir = ROOT / checkpoint_dir
+    data_dir = ROOT / data_dir_path
     out_dir = ROOT / args.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +115,7 @@ def main() -> None:
     per_seed: dict[str, dict] = {}
     deltas: list[float] = []
 
-    for seed in args.seeds:
+    for seed in seeds:
         ckpt = ckpt_dir / f"lstm_seed{seed}.pt"
         if not ckpt.exists():
             print(f"WARNING: checkpoint not found: {ckpt} — skipping seed {seed}")

@@ -27,14 +27,29 @@ sys.path.insert(0, str(ROOT))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Optuna HP search for LSTM FVG classifier")
+    parser.add_argument("--config", type=Path, default=None,
+                        help="Path to experiments/foo.yaml (optional — sets data_dir, window_size etc.)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "data.window_size=60"')
     parser.add_argument("--n-trials", type=int, default=50)
     parser.add_argument("--study-name", type=str, default="lstm_fvg")
-    parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--device", type=str, default="auto",
                         help="cpu | mps | cuda | auto")
     parser.add_argument("--max-epochs", type=int, default=50,
                         help="Max epochs per trial (default 50 to cap compute)")
     args = parser.parse_args()
+
+    # Resolve config (optional)
+    cfg = None
+    if args.config is not None:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        cfg = load_experiment(config_path, overrides or None)
 
     # Resolve device
     if args.device == "auto":
@@ -55,14 +70,16 @@ def main() -> None:
     from src.data.labels import LABELLERS
     from src.data.window import SMCWindowDataset
 
-    data_dir = ROOT / "data" / "processed"
+    data_dir = ROOT / (cfg.data.data_dir if cfg else Path("data/processed"))
+    window_size = cfg.data.window_size if cfg else 60
     train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
     val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
     # test parquet deliberately NOT loaded here
 
-    labeller = LABELLERS["fvg_valid"]()
-    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
-    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
+    labeller_key = cfg.data.labeller if cfg else "fvg_valid"
+    labeller = LABELLERS[labeller_key]()
+    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
+    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
 
     # Placeholder loaders — batch size overridden per trial in LSTMObjective
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True, num_workers=0)
@@ -75,7 +92,8 @@ def main() -> None:
 
     # Output dirs
     from src.rigor.report_utils import timestamped_dir
-    ts_dir = timestamped_dir(ROOT / args.output_dir)
+    output_dir = args.output_dir or (cfg.runtime.output_dir if cfg else Path("reports/rigor"))
+    ts_dir = timestamped_dir(ROOT / output_dir)
     ckpt_dir = ROOT / "checkpoints" / "lstm"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 

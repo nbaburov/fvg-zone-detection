@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.config import load_experiment
 from src.rigor.seed_sweep import SeedSweepConfig, _checkpoint_name, run_seed_sweep
 
 
@@ -62,6 +63,40 @@ def test_checkpoint_name_focal() -> None:
 def test_checkpoint_name_xgb() -> None:
     cfg = SeedSweepConfig(model_type="xgb", hyperparams={}, seeds=[0])
     assert _checkpoint_name(cfg, 0) == "xgb_seed0"
+
+
+# ---------------------------------------------------------------------------
+# SeedSweepConfig.from_experiment_config adapter
+# ---------------------------------------------------------------------------
+
+def test_from_experiment_config_lstm() -> None:
+    """from_experiment_config maps lstm_g1.yaml fields correctly."""
+    cfg = load_experiment("experiments/lstm_g1.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg)
+    assert sweep.model_type == "lstm"
+    assert sweep.seeds == cfg.train.seeds
+    assert sweep.loss_type == cfg.train.loss
+    assert sweep.focal_gamma == cfg.train.focal_gamma
+    assert sweep.hyperparams["hidden_size"] == cfg.model.hidden_size
+    assert sweep.hyperparams["lr"] == cfg.train.lr
+    assert sweep.hyperparams["batch_size"] == cfg.train.batch_size
+    assert sweep.ablation_no_dropout == cfg.train.ablation_no_dropout
+    assert sweep.ablation_no_l2 == cfg.train.ablation_no_l2
+
+
+def test_from_experiment_config_output_dir_override(tmp_path: Path) -> None:
+    """output_dir kwarg overrides cfg.runtime.output_dir."""
+    cfg = load_experiment("experiments/lstm_g1.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg, output_dir=tmp_path / "smoke")
+    assert sweep.output_dir == tmp_path / "smoke"
+
+
+def test_from_experiment_config_xgb() -> None:
+    """from_experiment_config maps xgb_g1.yaml arch correctly."""
+    cfg = load_experiment("experiments/xgb_g1.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg)
+    assert sweep.model_type == "xgb"
+    assert sweep.hyperparams["n_estimators"] == cfg.model.n_estimators
 
 
 # ---------------------------------------------------------------------------

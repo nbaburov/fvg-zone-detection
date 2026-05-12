@@ -32,12 +32,27 @@ def main() -> None:
                         help="Directory containing <model>_seed*_preds.npz files")
     parser.add_argument("--model", required=True, choices=["lstm", "xgb", "xgboost"],
                         help="Model type prefix to glob for")
-    parser.add_argument("--block-size", type=int, default=60)
-    parser.add_argument("--n-iter", type=int, default=1000)
+    parser.add_argument("--config", type=Path, default=None,
+                        help="Path to experiments/foo.yaml (optional — sets block_size, n_iter)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "eval.bootstrap_n_iter=500"')
+    parser.add_argument("--block-size", type=int, default=None)
+    parser.add_argument("--n-iter", type=int, default=None)
     parser.add_argument("--rng-seed", type=int, default=42,
                         help="RNG seed for bootstrap resampling")
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
+
+    # Resolve config (optional)
+    cfg = None
+    if args.config is not None:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        cfg = load_experiment(config_path, overrides or None)
 
     pred_dir = Path(args.pred_dir)
     if not pred_dir.is_absolute():
@@ -47,6 +62,10 @@ def main() -> None:
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve bootstrap params: CLI > config > default
+    block_size = args.block_size or (cfg.eval.bootstrap_block_size if cfg else 60)
+    n_iter = args.n_iter or (cfg.eval.bootstrap_n_iter if cfg else 1000)
 
     model_prefix = "xgb" if args.model in ("xgb", "xgboost") else args.model
     pred_files = sorted(pred_dir.glob(f"{model_prefix}_seed*_preds.npz"))
@@ -69,7 +88,6 @@ def main() -> None:
         print(f"WARNING: seeds have different test set sizes: {ns}")
 
     n = ns[0]
-    block_size = args.block_size
     eff_n = n // block_size
     print(f"\nTest set n={n}, block_size={block_size}, effective_n={eff_n}")
 
@@ -108,8 +126,8 @@ def main() -> None:
     boot_bulls: list[float] = []
     boot_bears: list[float] = []
 
-    print(f"\nRunning {args.n_iter} bootstrap iterations...")
-    for i in range(args.n_iter):
+    print(f"\nRunning {n_iter} bootstrap iterations...")
+    for i in range(n_iter):
         chosen = rng.choice(block_starts, size=n_blocks, replace=True)
         indices = np.concatenate([
             np.arange(start, min(start + block_size, n))
@@ -147,7 +165,7 @@ def main() -> None:
         "bear_f1_mean": point_mean_bear,
         "bear_ci_95_lower": float(np.percentile(bear_arr, 2.5)),
         "bear_ci_95_upper": float(np.percentile(bear_arr, 97.5)),
-        "n_bootstrap": args.n_iter,
+        "n_bootstrap": n_iter,
         "block_size": block_size,
         "effective_n": eff_n,
         "per_seed_point_macros": point_macros,

@@ -41,6 +41,41 @@ class SeedSweepConfig:
         self.checkpoint_dir = Path(self.checkpoint_dir)
         self.data_dir = Path(self.data_dir)
 
+    @classmethod
+    def from_experiment_config(
+        cls,
+        cfg: "Any",
+        output_dir: "Path | None" = None,
+        checkpoint_dir: "Path | None" = None,
+    ) -> "SeedSweepConfig":
+        """Build SeedSweepConfig from an ExperimentConfig.
+
+        Maps ExperimentConfig fields to SeedSweepConfig fields.
+        HP dict is built from cfg.model fields (excluding arch discriminator).
+        output_dir and checkpoint_dir can be overridden — useful for smoke tests.
+        """
+        # model hyperparams dict: everything except the arch discriminator
+        hp: dict[str, Any] = {
+            k: v for k, v in cfg.model.__dict__.items() if k != "arch"
+        }
+        # include training HP that seed_sweep uses from hp dict
+        hp["batch_size"] = cfg.train.batch_size
+        hp["lr"] = cfg.train.lr
+        hp["weight_decay"] = cfg.train.weight_decay
+
+        return cls(
+            model_type=cfg.model.arch,
+            hyperparams=hp,
+            seeds=list(cfg.train.seeds),
+            loss_type=cfg.train.loss,
+            focal_gamma=cfg.train.focal_gamma,
+            output_dir=output_dir if output_dir is not None else cfg.runtime.output_dir,
+            checkpoint_dir=checkpoint_dir if checkpoint_dir is not None else cfg.runtime.checkpoint_dir,
+            data_dir=cfg.data.data_dir,
+            ablation_no_dropout=cfg.train.ablation_no_dropout,
+            ablation_no_l2=cfg.train.ablation_no_l2,
+        )
+
 
 def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
     """Train one model per seed, evaluate on test set, return results DataFrame.

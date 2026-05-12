@@ -154,6 +154,24 @@ def build_parser() -> argparse.ArgumentParser:
             "Useful for verifying stream + window pipeline without trading."
         ),
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="YAML_PATH",
+        help=(
+            "Optional path to experiments/foo.yaml. When provided, data.data_dir "
+            "and data.window_size are sourced from config (CLI args take precedence)."
+        ),
+    )
+    parser.add_argument(
+        "--set",
+        dest="set_overrides",
+        nargs="+",
+        default=[],
+        metavar="key=value",
+        help='Override config fields: --set "data.window_size=60"',
+    )
 
     return parser
 

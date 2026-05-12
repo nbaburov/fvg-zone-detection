@@ -17,7 +17,7 @@ from src.config.schema import (
     TrainConfig,
     XGBModelConfig,
 )
-from src.config.loader import experiment_from_json, load_experiment
+from src.config.loader import experiment_from_json, load_experiment, parse_set_args
 from src.config.registry import LOSSES, MODELS, register_loss, register_model
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "RuntimeConfig",
     "load_experiment",
     "experiment_from_json",
+    "parse_set_args",
     "MODELS",
     "LOSSES",
     "register_model",

@@ -24,8 +24,23 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Per-class threshold tuning")
     parser.add_argument("--model-path", required=True, type=Path)
     parser.add_argument("--model-type", required=True, choices=["lstm", "xgboost"])
-    parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
+    parser.add_argument("--config", type=Path, default=None,
+                        help="Path to experiments/foo.yaml (optional — sets data_dir, eval params)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "data.data_dir=data/processed"')
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
+
+    # Resolve config (optional)
+    cfg = None
+    if args.config is not None:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        cfg = load_experiment(config_path, overrides or None)
 
     model_path = Path(args.model_path)
     if not model_path.is_absolute():
@@ -38,8 +53,9 @@ def main() -> None:
         find_f1_optimal_threshold,
     )
 
-    ts_dir = timestamped_dir(ROOT / args.output_dir)
-    data_dir = ROOT / "data" / "processed"
+    output_dir = args.output_dir or (cfg.runtime.output_dir if cfg else Path("reports/rigor"))
+    ts_dir = timestamped_dir(ROOT / output_dir)
+    data_dir = ROOT / (cfg.data.data_dir if cfg else Path("data/processed"))
 
     if args.model_type == "lstm":
         val_proba, val_true, test_proba, test_true = _get_lstm_probas(model_path, data_dir)

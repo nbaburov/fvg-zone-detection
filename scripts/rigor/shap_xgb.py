@@ -32,23 +32,40 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="SHAP analysis for XGBoost FVG classifier")
     parser.add_argument("--checkpoint", required=True, type=Path)
     parser.add_argument("--config", type=Path, default=None,
-                        help="best_xgb_config.json (for pruned retrain)")
+                        help="experiments/foo.yaml or best_xgb_config.json (for pruned retrain)")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "data.data_dir=data/processed"')
     parser.add_argument("--drop-threshold", type=float, default=1e-4)
-    parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
+
+    # Resolve config (optional — YAML or JSON)
+    cfg = None
+    resolved_config_arg = None  # passed to SHAP worker for pruned retrain
+    if args.config is not None:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = ROOT / config_path
+        if config_path.suffix in (".yaml", ".yml"):
+            from src.config.loader import load_experiment, parse_set_args
+            overrides = parse_set_args(args.set_overrides)
+            cfg = load_experiment(config_path, overrides or None)
+        resolved_config_arg = str(config_path)
 
     ckpt_path = Path(args.checkpoint)
     if not ckpt_path.is_absolute():
         ckpt_path = ROOT / ckpt_path
 
     from src.rigor.report_utils import timestamped_dir
-    ts_dir = timestamped_dir(ROOT / args.output_dir)
+    output_dir = args.output_dir or (cfg.runtime.output_dir if cfg else Path("reports/rigor"))
+    ts_dir = timestamped_dir(ROOT / output_dir)
 
     # Load val data (for SHAP) and test data (for pruned retrain comparison)
     import pandas as pd
     from src.features.window_features import extract_window_features, FEATURE_NAMES
 
-    data_dir = ROOT / "data" / "processed"
+    data_dir = ROOT / (cfg.data.data_dir if cfg else Path("data/processed"))
     val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
     test_df = pd.read_parquet(data_dir / "spy_h1_test.parquet")
     X_val, y_val = extract_window_features(val_df)
@@ -65,7 +82,7 @@ def main() -> None:
     worker_path = ROOT / "scripts" / "rigor" / "_workers" / "_shap_worker.py"
     _write_shap_worker(worker_path)
 
-    config_arg = str(args.config) if args.config else ""
+    config_arg = resolved_config_arg or ""
     cmd = [
         sys.executable, str(worker_path),
         "--checkpoint", str(ckpt_path),

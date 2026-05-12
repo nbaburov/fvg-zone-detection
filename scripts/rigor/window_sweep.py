@@ -1,6 +1,10 @@
 """window_sweep.py — Window size sensitivity analysis (Gap 7).
 
-Usage:
+Usage (new — config-driven):
+  python scripts/rigor/window_sweep.py --config experiments/lstm_g1.yaml
+      [--windows 30 60 90 120] [--set "train.seeds=[42]"]
+
+Usage (legacy — JSON config, still supported):
   python scripts/rigor/window_sweep.py --config reports/rigor/<ts>/best_lstm_config.json
       [--windows 30 60 90 120] [--seed 42] [--output-dir reports/rigor]
 
@@ -13,30 +17,78 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 
+def _is_yaml_path(path: Path) -> bool:
+    return path.suffix in (".yaml", ".yml")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Window size sweep for LSTM")
-    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--config", required=True, type=Path,
+                        help="Path to experiments/foo.yaml or legacy best_lstm_config.json")
+    parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
+                        metavar="key=value",
+                        help='Override config fields: --set "train.seeds=[42]"')
     parser.add_argument("--windows", nargs="+", type=int, default=[30, 60, 90, 120])
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--patience", type=int, default=15)
-    parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
-    parser.add_argument("--data-dir", type=Path, default=Path("data/processed"))
+    # Legacy flags
+    parser.add_argument("--seed", type=int, default=None,
+                        help="[Legacy] single seed. Use --set 'train.seeds=[42]' with YAML config.")
+    parser.add_argument("--patience", type=int, default=None,
+                        help="[Legacy] patience. Use --set 'train.patience=N' with YAML config.")
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--data-dir", type=Path, default=None)
     args = parser.parse_args()
 
     config_path = Path(args.config)
     if not config_path.is_absolute():
         config_path = ROOT / config_path
 
-    with config_path.open() as fh:
-        hyperparams = json.load(fh)
-    hp = {k: v for k, v in hyperparams.items()
-          if k not in ("val_macro_f1", "trial_number", "study_name", "storage")}
+    if _is_yaml_path(config_path):
+        from src.config.loader import load_experiment, parse_set_args
+        overrides = parse_set_args(args.set_overrides)
+        if args.seed is not None:
+            warnings.warn(
+                "--seed is deprecated when using YAML config. "
+                "Use --set 'train.seeds=[42]' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            overrides.setdefault("train.seeds", [args.seed])
+        if args.patience is not None:
+            warnings.warn(
+                "--patience is deprecated when using YAML config. "
+                "Use --set 'train.patience=N' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            overrides.setdefault("train.patience", args.patience)
+        if args.data_dir is not None:
+            overrides["data.data_dir"] = str(args.data_dir)
+
+        cfg = load_experiment(config_path, overrides or None)
+        seed = cfg.train.seeds[0]
+        patience = cfg.train.patience
+        data_dir = ROOT / cfg.data.data_dir
+        output_dir = ROOT / (args.output_dir or cfg.runtime.output_dir)
+        hp = {k: v for k, v in cfg.model.__dict__.items() if k != "arch"}
+        hp["batch_size"] = cfg.train.batch_size
+        hp["lr"] = cfg.train.lr
+        hp["weight_decay"] = cfg.train.weight_decay
+    else:
+        with config_path.open() as fh:
+            hyperparams = json.load(fh)
+        hp = {k: v for k, v in hyperparams.items()
+              if k not in ("val_macro_f1", "trial_number", "study_name", "storage")}
+        seed = args.seed if args.seed is not None else 42
+        patience = args.patience if args.patience is not None else 15
+        data_dir = ROOT / (args.data_dir or Path("data/processed"))
+        output_dir = ROOT / (args.output_dir or Path("reports/rigor"))
 
     import pandas as pd
     import torch
@@ -51,8 +103,7 @@ def main() -> None:
     from src.training.train_utils import set_seed
     from src.rigor.report_utils import timestamped_dir
 
-    data_dir = ROOT / args.data_dir
-    ts_dir = timestamped_dir(ROOT / args.output_dir)
+    ts_dir = timestamped_dir(output_dir)
 
     train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
     val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
@@ -74,7 +125,7 @@ def main() -> None:
 
     for W in args.windows:
         print(f"\nWindow size W={W}...")
-        set_seed(args.seed)
+        set_seed(seed)
 
         train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=W, drop_cross_session_windows=False)
         val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=W, drop_cross_session_windows=False)
@@ -97,7 +148,7 @@ def main() -> None:
         lr = float(hp.get("lr", 1e-3))
         wd = float(hp.get("weight_decay", 1e-4))
         optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
-        early_stop = EarlyStop(patience=args.patience, mode="max")
+        early_stop = EarlyStop(patience=patience, mode="max")
 
         best_val_f1 = 0.0
         best_state = None
@@ -165,7 +216,7 @@ def main() -> None:
     # Print recommendation
     best_row = max(results, key=lambda r: r["val_macro_f1"])
     print(f"\nBest window by val F1: W={best_row['window_size']} (val={best_row['val_macro_f1']:.4f})")
-    print("CNN-LSTM kernel recommendation: kernel_size <= W//3 (typically 3–10)")
+    print("CNN-LSTM kernel recommendation: kernel_size <= W//3 (typically 3-10)")
 
     # Plotly chart
     try:
