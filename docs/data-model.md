@@ -3,7 +3,7 @@
 ## On-disk artifacts
 
 ### `data/raw/spy_minute.parquet`
-Raw 1-minute SPY bars from Alpaca, full history 2018+, RTH only.
+Raw 1-minute SPY bars from Alpaca, full history 2016+, RTH only.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -23,21 +23,21 @@ H1 resampled from 1-min via `closed='left', label='left', offset='30min'`. RTH o
 | volume | int64 | Sum of 1-min volume |
 | session_type | category | `regular` / `half_day` |
 
-### `data/processed/spy_h1_labeled.parquet`
-Same as `spy_h1.parquet` plus the label column.
+### `data/processed/spy_h1.parquet`
+Full H1 dataset with label columns. (`spy_h1_labeled.parquet` was the legacy name — deprecated and deleted after ValidFVG migration.)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| raw_label | int8 | Original 3-class label from `FVGLabeller` (geometric, N+1) — kept as baseline comparator |
-| label | int8 | Training target: `0`=none, `1`=bullish FVG, `2`=bearish FVG, from `ValidFVGLabeller` at N+2 |
+| fvg_valid | int8 | **Canonical training target** — `ValidFVGLabeller` @ N+2, 6-criteria, ~3% positive rate |
+| fvg | int8 | Historical raw `FVGLabeller` @ N+1, ~25% positive rate (kept for rawfvg checkpoints) |
 
 ### `data/processed/spy_h1_{train,val,test}.parquet`
 Temporal split — no shuffle.
-- train: 2018–2022
-- val: 2022–2023
-- test: 2023–2024
+- train: 2016–2021 (10,577 bars; none=96.8%, bull=1.9%, bear=1.3%)
+- val: 2022 (1,757 bars)
+- test: 2023–2025 (5,257 bars)
 
-Schema = labeled parquet schema.
+Label column: `fvg_valid`. Schema = `spy_h1.parquet` schema.
 
 ### `data/processed/class_weights.json`
 Inverse-frequency weights computed on train split, consumed by `WeightedCE`.

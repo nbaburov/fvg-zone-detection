@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -39,7 +40,20 @@ class LSTMAdapter(ModelAdapter):
                 f"LSTM checkpoint not found: {checkpoint_path}"
             )
 
-        self._model = FVGLSTMClassifier()
+        # Read HP from meta sidecar so architecture matches checkpoint
+        meta_path = checkpoint_path.with_suffix(".meta.json")
+        hp: dict = {}
+        if meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+            hp = meta.get("hyperparams", {})
+
+        self._model = FVGLSTMClassifier(
+            hidden_size=hp.get("hidden_size", 64),
+            num_layers=hp.get("num_layers", 2),
+            dropout=hp.get("dropout", 0.3),
+            head_dropout=hp.get("head_dropout", 0.5),
+        )
         state = torch.load(str(checkpoint_path), map_location="cpu", weights_only=True)
         # Support both bare state_dict and wrapped {"model_state_dict": ...}
         if isinstance(state, dict) and "model_state_dict" in state:

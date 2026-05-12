@@ -24,8 +24,10 @@ _DEFAULT_CHECKPOINT = "xgb_seed42.ubj"
 # Warn if windows look normalised (likely wrong input for XGBoost)
 _NORM_RANGE_THRESHOLD = 5.0
 
-# Use subprocess isolation on Python 3.14+
-_NEED_SUBPROCESS = sys.version_info >= (3, 14)
+# Force subprocess isolation unconditionally — on Apple Silicon (arm64) xgboost
+# segfaults when loaded in-process after PyTorch has been imported (libgomp clash).
+# Subprocess avoids the issue at the cost of ~0.5 s process-startup overhead per batch.
+_NEED_SUBPROCESS = True
 
 _WORKER_PATH = Path(__file__).resolve().parent / "_xgb_worker.py"
 

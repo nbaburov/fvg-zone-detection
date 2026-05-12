@@ -9,10 +9,10 @@ smc-data-challenge/
 ├── data/                          # all on-disk data (gitignored except .gitkeep + gold)
 │   ├── raw/spy_minute.parquet     # 1-min SPY bars from Alpaca
 │   ├── processed/                 # H1 + splits + class weights
-│   │   ├── spy_h1.parquet
-│   │   ├── spy_h1_labeled.parquet # adds raw_label + encoded label columns
-│   │   ├── spy_h1_{train,val,test}.parquet
-│   │   └── class_weights.json
+│   │   ├── spy_h1.parquet          # H1 bars with fvg_valid + fvg label columns
+│   │   ├── spy_h1_{train,val,test}.parquet  # 2016–2021/2022/2023–2025 temporal split
+│   │   ├── class_weights.json      # alias for class_weights_fvg_valid.json
+│   │   └── class_weights_fvg_valid.json
 │   └── gold_labels.csv            # human-annotated validation set
 │
 ├── src/                           # all importable code
@@ -69,7 +69,7 @@ smc-data-challenge/
 │   ├── data/                      # data utilities
 │   │   ├── annotate_gold_set.py   # interactive Plotly gold-set annotation
 │   │   ├── count_valid_fvg.py     # sparsity gate for ValidFVGLabeller tuning
-│   │   └── persist_labels.py      # refresh spy_h1_labeled.parquet
+│   │   └── persist_labels.py      # deprecated — exits 0 with notice (labels now in spy_h1.parquet)
 │   ├── training/                  # model training
 │   │   ├── train_lstm.py          # train + save LSTM
 │   │   └── train_xgboost.py       # train + save XGBoost
@@ -240,7 +240,7 @@ sequenceDiagram
 
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `persist_labels.py` | Refresh `spy_h1_labeled.parquet` after labeller config change | `python scripts/data/persist_labels.py` |
+| `persist_labels.py` | **Deprecated** — labels are now embedded in `spy_h1.parquet` via pipeline. Script exits 0 with a notice. | — |
 | `count_valid_fvg.py` | Sparsity gate — count positives produced by current `ValidFVGLabeller` config | `python scripts/data/count_valid_fvg.py` |
 | `annotate_gold_set.py` | Interactive Plotly annotation of gold validation set | `python scripts/data/annotate_gold_set.py` |
 

@@ -373,3 +373,61 @@ Three caveats from Phase D 10/10 completion fixed before final commit.
 **Leakage check:** `threshold_sweep.py` lines 50–51 assert val vs test are different objects. Threshold search in `compute_pr_curves()` / `find_f1_optimal_threshold()` uses only `val_proba`/`val_true`. Test accessed only for final measurement at line 69. No leakage.
 
 **Artifact:** `reports/rigor/2026-05-13/G4/threshold_tuning.json` (overwritten with both models + summary section)
+
+---
+
+# Phase E — Inspect + Docs (2026-05-12)
+
+## Done
+
+### Task 1 — Inspect tool
+- Fixed `src/inspect/adapters/lstm_adapter.py`: instantiated `FVGLSTMClassifier()` with defaults (hidden=64, layers=2) regardless of checkpoint. Fixed to read `hyperparams` from `.meta.json` sidecar and pass to constructor. Without fix: `RuntimeError: size mismatch for lstm.weight_ih_l0`.
+- Fixed `src/inspect/adapters/xgboost_adapter.py`: `_NEED_SUBPROCESS` was `sys.version_info >= (3, 14)` only. On Python 3.12 arm64, XGBoost segfaults when loaded after torch (libgomp clash). Changed to `_NEED_SUBPROCESS = True` (always subprocess).
+- Ran `scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20 --output-dir reports/inspect/2026-05-13 --dataset test`.
+- Output: `reports/inspect/2026-05-13/2026-05-12_214640/` — 2 timeline HTML (488KB, 491KB) + 20 window HTML (~11KB each) + `summary.md`.
+- LSTM inspect F1: bull=0.422, bear=0.392, macro=0.408 (seed42 checkpoint).
+- XGB inspect F1: bull=0.605, bear=0.578, macro=0.591 (seed42 G1 HP checkpoint).
+- Overall model agreement: 0.946.
+
+### Task 2 — docs/models-status.md
+- Full rewrite. All stale 2018–2024 dates replaced with 2016–2025.
+- All 10 rigor gap results populated from JSON artifacts. Numbers cross-verified.
+- Dual-FVG comparison section preserved.
+- Historical raw-FVG checkpoints noted.
+- Inspect reports reference added.
+
+### Task 3 — CLAUDE.md
+- Added "Current baselines" line under "Current label target" block: LSTM 0.599 ± 0.025, XGB 0.721 ± 0.001.
+- MPS gotchas section already correct (CPU-only LSTM, subprocess XGB). No other changes needed.
+
+### Task 4 — @nb-review (architecture-level)
+- Verdict: PASS.
+- 2 minor issues found:
+  1. G9 multiseed .md files show control data (pre-fix stale run). Canonical data is in `reg_ablation_summary.json`. Cosmetic only.
+  2. lstm_seed42.meta.json shows `"device": "mps"` (Phase C checkpoint). Weights are device-agnostic; cosmetic.
+- No architectural violations, no leakage, no temporal shuffle in data pipeline.
+- Review log: `.nb-suite/reviews/12-May-26/phase-e-architecture-review.md`.
+
+### Task 5 — @nb-update (context sync)
+- `README.md`: updated model status table (stale raw-FVG F1 0.824/0.62 → ValidFVG 0.599/0.721).
+- `docs/data-model.md`: replaced `spy_h1_labeled.parquet` schema with current `spy_h1.parquet` + `fvg_valid` column. Updated split dates to 2016–2025. Updated raw date reference 2018+ → 2016+.
+- `docs/architecture.md`: replaced `spy_h1_labeled.parquet` tree entry with current files. Updated `persist_labels.py` entry to "deprecated". Updated scripts table.
+- `CLAUDE.md`: baseline numbers added (see Task 3).
+- Memory `project_smc_challenge.md`: updated to reflect ValidFVG as canonical target, correct F1 numbers, CPU-only LSTM, subprocess XGB.
+
+## Good
+
+- Inspect tool now respects meta.json HP — no architecture mismatch on any future checkpoint.
+- XGBoost subprocess isolation is now unconditional — no future segfault risk from Python version changes.
+- All docs consistently reference 2016–2025 data and ValidFVG labels.
+
+## Bad / Pre-existing
+
+- G9 stale `.md` summaries (from before checkpoint-fix): noted in review, not fixed in Phase E (cosmetic, canonical JSON is correct).
+- lstm_seed42.meta.json `"device": "mps"` (pre-CPU-migration checkpoint): cosmetic, weights are correct.
+
+## Open Flags
+
+- CNN-LSTM next. Plan exists in rigor research docs.
+- Status Update 1 (May 17): docs and baselines ready.
+
