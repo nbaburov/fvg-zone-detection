@@ -204,6 +204,7 @@ def run_study(
     direction: str = "maximize",
     n_startup_trials: int = 5,
     n_warmup_steps: int = 10,
+    timeout: int = 300,
 ) -> optuna.Study:
     """Create or load Optuna study from SQLite and run n_trials.
 
@@ -230,7 +231,13 @@ def run_study(
     n_remaining = max(0, n_trials - n_done)
 
     if n_remaining > 0:
-        study.optimize(objective, n_trials=n_remaining, show_progress_bar=True)
+        study.optimize(
+            objective,
+            n_trials=n_remaining,
+            show_progress_bar=True,
+            timeout=timeout,   # 5 min per trial max — prevents CPU/process hang
+            n_jobs=1,          # always serial (XGB subprocess safety + MPS thread-safety)
+        )
     else:
         print(f"Study '{study_name}' already has {n_done} completed trials — skipping.")
 

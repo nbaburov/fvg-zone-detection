@@ -83,11 +83,12 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 def select_device(requested: str) -> torch.device:
-    if requested == "auto":
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-    return torch.device(requested)
+    # MPS LSTM gradient kernel is broken in torch 2.11 — multi-layer backprop deadlocks.
+    # CPU is the only reliable device for LSTM training on Apple Silicon.
+    # See .nb-suite/research/12-May-26/mps-gpu-fix.md
+    if requested == "mps":
+        print("WARNING: MPS requested but LSTM training is CPU-only. Using CPU.")
+    return torch.device("cpu")
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +511,7 @@ def main() -> None:
     print(f"Device: {device}")
 
     metadata = log_run_metadata(args.seed, device)
+    metadata["device"] = "cpu (forced — MPS LSTM bug, see .nb-suite/research/12-May-26/mps-gpu-fix.md)"
     print(f"Metadata: {metadata}")
 
     # Data

@@ -1,4 +1,18 @@
-"""Tests for src/models/xgboost_baseline.py."""
+"""Tests for src/models/xgboost_baseline.py.
+
+Run separately from the rest of the suite:
+
+    .venv/bin/pytest tests/models/test_xgboost_baseline.py
+
+Default `pytest` invocation skips this file via `pytest.ini` (`addopts`).
+Reason: on macOS arm64, XGBoost.fit + torch in the same process segfaults
+(libgomp interaction). Once any torch-importing test module is collected
+in the same session, this file crashes. Process isolation via
+pytest-forked / pytest-isolate fails because pytest's parent is
+multi-threaded (fork unsafe). Cleanest solution: separate invocation.
+
+The Makefile target `make test` runs both halves sequentially.
+"""
 
 from __future__ import annotations
 

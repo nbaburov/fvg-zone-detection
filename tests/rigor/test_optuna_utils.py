@@ -3,25 +3,32 @@
 Runs 2 trials for both LSTMObjective and XGBObjective using tiny synthetic data.
 Verifies study create/load idempotency and best params dict keys.
 
-Note: XGBObjective tests are skipped on Python 3.14 due to the known XGBoost
-segfault on Python 3.14 (in-process inference crashes). The real tune_xgboost.py
-script uses the _xgb_worker.py subprocess workaround. See CLAUDE.md.
+XGB tests use subprocess workers to match production behaviour and avoid the
+macOS arm64 libgomp segfault when XGB.fit runs in a process that has imported
+torch. The same pattern is used by scripts/rigor/_workers/_xgb_tune_worker.py
+in production.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import optuna
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.rigor.optuna_utils import LSTMObjective, XGBObjective, run_study
+from src.rigor.optuna_utils import LSTMObjective, run_study
 
-_XGB_SKIP = sys.version_info >= (3, 14)
+# Path to the project root (two levels up from tests/rigor/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_XGB_WORKER = _PROJECT_ROOT / "scripts" / "rigor" / "_workers" / "_xgb_tune_worker.py"
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +49,60 @@ def _make_xgb_arrays(n: int = 120) -> tuple[np.ndarray, np.ndarray]:
     X = rng.standard_normal((n, 35)).astype(np.float32)
     y = rng.integers(0, 3, size=n)
     return X, y
+
+
+def _run_xgb_study_subprocess(
+    tmp_path: Path,
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    n_trials: int,
+    study_name: str,
+) -> optuna.Study:
+    """Run XGBObjective trials via subprocess worker (matches production pattern).
+
+    Avoids the macOS arm64 libgomp segfault that occurs when xgb.fit() is
+    called in-process after torch has been imported.
+    """
+    # Save arrays to npz (worker expects X_train, y_train, X_val, y_val, sample_weight)
+    sample_weight = np.ones(len(y_train), dtype=np.float32)
+    npz_path = tmp_path / "data.npz"
+    np.savez(npz_path, X_train=X_train, y_train=y_train,
+             X_val=X_val, y_val=y_val, sample_weight=sample_weight)
+
+    db_url = f"sqlite:///{tmp_path}/{study_name}.db"
+    output_config = tmp_path / f"{study_name}_best.json"
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_PROJECT_ROOT)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_XGB_WORKER),
+            "--data-npz", str(npz_path),
+            "--storage-url", db_url,
+            "--study-name", study_name,
+            "--n-trials", str(n_trials),
+            "--output-config", str(output_config),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(_PROJECT_ROOT),
+        env=env,
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"XGB worker failed (exit {result.returncode}):\n"
+            f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+        )
+
+    # Load study from the SQLite db that the worker wrote
+    study = optuna.load_study(study_name=study_name, storage=db_url)
+    return study
 
 
 # ---------------------------------------------------------------------------
@@ -101,22 +162,17 @@ def test_lstm_objective_best_params_have_expected_keys(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# XGBObjective smoke test — skipped on Python 3.14 (XGB segfault, use subprocess)
+# XGBObjective smoke tests — use subprocess worker (matches production pattern)
+# Avoids macOS arm64 libgomp segfault when xgb.fit runs after torch import.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(_XGB_SKIP, reason="XGBoost segfaults in-process on Python 3.14")
 def test_xgb_objective_runs_2_trials(tmp_path: Path) -> None:
     X_train, y_train = _make_xgb_arrays(100)
     X_val, y_val = _make_xgb_arrays(40)
 
-    objective = XGBObjective(X_train, y_train, X_val, y_val)
-
-    db_url = f"sqlite:///{tmp_path}/xgb_test.db"
-    study = run_study(
-        objective,
-        n_trials=2,
-        storage_url=db_url,
-        study_name="xgb_smoke",
+    study = _run_xgb_study_subprocess(
+        tmp_path, X_train, y_train, X_val, y_val,
+        n_trials=2, study_name="xgb_smoke",
     )
 
     assert len(study.trials) >= 2
@@ -125,15 +181,14 @@ def test_xgb_objective_runs_2_trials(tmp_path: Path) -> None:
     assert 0.0 <= best.value <= 1.0
 
 
-@pytest.mark.skipif(_XGB_SKIP, reason="XGBoost segfaults in-process on Python 3.14")
 def test_xgb_objective_best_params_have_expected_keys(tmp_path: Path) -> None:
     X_train, y_train = _make_xgb_arrays(100)
     X_val, y_val = _make_xgb_arrays(40)
 
-    objective = XGBObjective(X_train, y_train, X_val, y_val)
-
-    db_url = f"sqlite:///{tmp_path}/xgb_keys.db"
-    study = run_study(objective, n_trials=2, storage_url=db_url, study_name="xgb_keys")
+    study = _run_xgb_study_subprocess(
+        tmp_path, X_train, y_train, X_val, y_val,
+        n_trials=2, study_name="xgb_keys",
+    )
 
     expected_keys = {
         "n_estimators", "max_depth", "learning_rate",
@@ -146,23 +201,24 @@ def test_xgb_objective_best_params_have_expected_keys(tmp_path: Path) -> None:
 # Study idempotency (create / load)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(_XGB_SKIP, reason="XGBoost segfaults in-process on Python 3.14")
 def test_run_study_loads_existing_study(tmp_path: Path) -> None:
-    """Running run_study twice on same db should NOT duplicate to > n_trials."""
+    """Running XGB worker twice on same db should NOT add more trials."""
     X_train, y_train = _make_xgb_arrays(60)
     X_val, y_val = _make_xgb_arrays(20)
 
-    objective = XGBObjective(X_train, y_train, X_val, y_val)
-    db_url = f"sqlite:///{tmp_path}/idempotent.db"
+    study1 = _run_xgb_study_subprocess(
+        tmp_path, X_train, y_train, X_val, y_val,
+        n_trials=2, study_name="idem_test",
+    )
+    n_after_first = len(study1.trials)
 
-    study1 = run_study(objective, n_trials=2, storage_url=db_url, study_name="idem_test")
-    n_after_first = len([t for t in study1.trials])
+    # Re-run — worker's run_study_xgb is idempotent, should skip since n_done >= n_trials
+    study2 = _run_xgb_study_subprocess(
+        tmp_path, X_train, y_train, X_val, y_val,
+        n_trials=2, study_name="idem_test",
+    )
+    n_after_second = len(study2.trials)
 
-    # Re-run — should skip since n_done >= n_trials
-    study2 = run_study(objective, n_trials=2, storage_url=db_url, study_name="idem_test")
-    n_after_second = len([t for t in study2.trials])
-
-    # Trial count should not grow beyond n_trials on second call
     assert n_after_second == n_after_first
 
 
