@@ -12,7 +12,7 @@ Exit codes:
   1 — n_pos < 75   → escalate to user before proceeding
 
 Usage:
-    python scripts/count_valid_fvg.py
+    python scripts/data/count_valid_fvg.py
 
 Saves ablation CSV to .nb-suite/analysis/criterion-ablation-<date>.csv.
 """
@@ -26,7 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 # Ensure project root is on sys.path when run as script
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

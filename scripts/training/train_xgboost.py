@@ -1,7 +1,7 @@
 """train_xgboost.py — End-to-end XGBoost baseline training for FVG classification.
 
 Usage:
-    python scripts/train_xgboost.py [--seed 42] [--output-dir checkpoints/xgboost]
+    python scripts/training/train_xgboost.py [--seed 42] [--output-dir checkpoints/xgboost]
 
 Steps:
     1. Set global seed.
@@ -30,7 +30,7 @@ import xgboost as xgb
 from sklearn.metrics import classification_report, confusion_matrix
 
 # Ensure repo root is on sys.path
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 

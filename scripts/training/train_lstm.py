@@ -2,7 +2,7 @@
 """train_lstm.py — End-to-end LSTM baseline training for FVG ternary classification.
 
 Usage:
-    python scripts/train_lstm.py [--seed 42] [--device auto] [--output-dir checkpoints/lstm] [--debug]
+    python scripts/training/train_lstm.py [--seed 42] [--device auto] [--output-dir checkpoints/lstm] [--debug]
 
 Steps:
     1. set_seed

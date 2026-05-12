@@ -3,7 +3,7 @@
 Gold-set annotation runner.
 
 Usage:
-    python scripts/annotate_gold_set.py
+    python scripts/data/annotate_gold_set.py
 
 Loads the processed H1 DataFrame, samples the 75-candle gold set,
 opens the interactive Plotly annotation UI, and saves results to
@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Ensure project root is on sys.path when run directly
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

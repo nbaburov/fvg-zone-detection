@@ -7,7 +7,7 @@ Copies spy_h1.parquet → spy_h1_labeled.parquet if:
 Idempotent: running twice produces the same result.
 
 Usage:
-    python scripts/persist_labels.py
+    python scripts/data/persist_labels.py
 
 Exit codes:
     0 — success (created or confirmed up-to-date)
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pandas as pd
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent.parent
 SRC = REPO / "data" / "processed" / "spy_h1.parquet"
 DST = REPO / "data" / "processed" / "spy_h1_labeled.parquet"
 LABELLER_SRC = REPO / "src" / "data" / "labels" / "valid_fvg.py"
