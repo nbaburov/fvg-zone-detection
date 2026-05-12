@@ -23,6 +23,10 @@ venv/
 logs/
 *.log
 
+# Test predictions & analysis artifacts (ephemeral model outputs)
+data/processed/test_predictions*.npz
+reports/
+
 # Env vars (real)
 .env
 .env.local
