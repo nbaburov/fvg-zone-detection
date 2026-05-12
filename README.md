@@ -51,14 +51,14 @@ cp .env.example .env
 python -c "from src.data.pipeline import build_pipeline; build_pipeline()"
 
 # 5. Train baselines
-python scripts/train_xgboost.py
-python scripts/train_lstm.py
+python scripts/training/train_xgboost.py
+python scripts/training/train_lstm.py
 
 # 6. Inspect on unseen data
 python scripts/inspect_models.py \
     --models lstm xgboost \
     --dataset test \
-    --start 2024-01-01 --end 2024-02-29 \
+    --start 2023-01-01 --end 2024-12-31 \
     --lookahead-bars 20 --tp-rr 2.0
 
 # 7. (Optional) Live paper trade during market hours
@@ -92,7 +92,7 @@ src/models/    architectures (LSTM, XGBoost)
 src/training/  loss, early stop, train utils
 src/inspect/   offline model inspection toolkit
 src/live/      live paper-trading harness
-scripts/       CLI entry points (train, inspect, paper_trade)
+scripts/       CLI entry points (data/, training/, rigor/, inspect_models, paper_trade)
 notebooks/     CRISP-DM presentation notebooks
 tests/         pytest, mirrors src/
 docs/          this directory
@@ -111,10 +111,10 @@ pytest tests/data/labels/ -q   # labeller suites (incl. anti-lookahead fixtures)
 
 ## Critical constraints (the non-negotiables)
 
-- **Temporal split only.** Train 2018–2022 / val 2022–2023 / test 2023–2024. No shuffling.
+- **Temporal split only.** Train 2016–2021 / val 2022 / test 2023–2025. No shuffling. Boundaries in `src/data/split.py` as `SPLIT_BOUNDARIES` dict.
 - **No lookahead.** Labels use only information available at candle close. ValidFVGLabeller places labels at N+2 (reaction candle), raw FVGLabeller at N+1. Mandatory pytest fixture enforces this.
 - **F1 on minority class is the headline metric.** Accuracy is meaningless on 75/15/10 imbalance.
-- **Weighted cross-entropy** for the DL models; sample weights for XGBoost. Inverse-frequency weights persisted to `class_weights.json`.
+- **Weighted cross-entropy** for the DL models; sample weights for XGBoost. Inverse-frequency weights persisted to `data/processed/class_weights.json`.
 - **Live windowing = training windowing.** The live harness imports `normalise_window` and `_MAX_INTRA_WINDOW_GAP_MINUTES` directly from the training package. No duplication, no drift.
 
 ## Hardware notes

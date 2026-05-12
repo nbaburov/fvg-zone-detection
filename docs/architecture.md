@@ -66,11 +66,26 @@ smc-data-challenge/
 │       └── replay.py              # deterministic session replay for debug
 │
 ├── scripts/                       # CLI entry points
-│   ├── annotate_gold_set.py       # interactive Plotly gold-set annotation
-│   ├── count_valid_fvg.py         # sparsity gate for ValidFVGLabeller tuning
-│   ├── persist_labels.py          # refresh spy_h1_labeled.parquet
-│   ├── train_lstm.py              # train + save LSTM
-│   ├── train_xgboost.py           # train + save XGBoost
+│   ├── data/                      # data utilities
+│   │   ├── annotate_gold_set.py   # interactive Plotly gold-set annotation
+│   │   ├── count_valid_fvg.py     # sparsity gate for ValidFVGLabeller tuning
+│   │   └── persist_labels.py      # refresh spy_h1_labeled.parquet
+│   ├── training/                  # model training
+│   │   ├── train_lstm.py          # train + save LSTM
+│   │   └── train_xgboost.py       # train + save XGBoost
+│   ├── rigor/                     # rigor sprint tools (tuning, analysis)
+│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation
+│   │   ├── tune_lstm.py           # Optuna HP search for LSTM
+│   │   ├── tune_xgboost.py        # Optuna HP search for XGBoost
+│   │   ├── threshold_sweep.py     # per-class F1-optimal thresholds
+│   │   ├── window_sweep.py        # window size sensitivity analysis
+│   │   ├── asymmetry_analysis.py  # bull vs bear asymmetry (Gap 6)
+│   │   ├── bootstrap_ci.py        # block bootstrap confidence intervals (Gap 10)
+│   │   ├── shap_xgb.py            # SHAP feature importance (Gap 5)
+│   │   └── _workers/              # subprocess workers (Python 3.14 segfault workaround)
+│   │       ├── _xgb_sweep_worker.py
+│   │       ├── _xgb_tune_worker.py
+│   │       └── _shap_worker.py
 │   ├── inspect_models.py          # offline inspector CLI
 │   └── paper_trade.py             # live paper trader CLI
 │
@@ -221,15 +236,40 @@ sequenceDiagram
 
 ## Scripts — what each does
 
+### Data utilities (`scripts/data/`)
+
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `scripts/train_xgboost.py` | Train XGBoost on windowed features | `python scripts/train_xgboost.py` |
-| `scripts/train_lstm.py` | Train LSTM (MPS or CPU) | `python scripts/train_lstm.py` |
-| `scripts/persist_labels.py` | Refresh `spy_h1_labeled.parquet` after labeller config change | `python scripts/persist_labels.py` |
-| `scripts/count_valid_fvg.py` | Sparsity gate — count positives produced by current `ValidFVGLabeller` config | `python scripts/count_valid_fvg.py` |
-| `scripts/annotate_gold_set.py` | Interactive Plotly annotation of gold validation set | `python scripts/annotate_gold_set.py` |
-| `scripts/inspect_models.py` | Offline model inspection on test set with TP/SL outcome simulation | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` |
-| `scripts/paper_trade.py` | Live paper trading via Alpaca (one process per model) | `python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001` |
+| `persist_labels.py` | Refresh `spy_h1_labeled.parquet` after labeller config change | `python scripts/data/persist_labels.py` |
+| `count_valid_fvg.py` | Sparsity gate — count positives produced by current `ValidFVGLabeller` config | `python scripts/data/count_valid_fvg.py` |
+| `annotate_gold_set.py` | Interactive Plotly annotation of gold validation set | `python scripts/data/annotate_gold_set.py` |
+
+### Training (`scripts/training/`)
+
+| Script | Purpose | Typical command |
+|--------|---------|-----------------|
+| `train_xgboost.py` | Train XGBoost on windowed features | `python scripts/training/train_xgboost.py` |
+| `train_lstm.py` | Train LSTM (MPS or CPU) | `python scripts/training/train_lstm.py` |
+
+### Rigor sprint tools (`scripts/rigor/`)
+
+| Script | Purpose | Typical command |
+|--------|---------|-----------------|
+| `multiseed_run.py` | Multi-seed training sweep with loss ablation | `python scripts/rigor/multiseed_run.py --model lstm --config <config.json> --seeds 42 17 0 123 2024 --loss weighted_ce` |
+| `tune_lstm.py` | Optuna hyperparameter search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
+| `tune_xgboost.py` | Optuna hyperparameter search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
+| `threshold_sweep.py` | Per-class F1-optimal threshold tuning | `python scripts/rigor/threshold_sweep.py --model-path <checkpoint> --model-type lstm` |
+| `window_sweep.py` | Window size sensitivity analysis | `python scripts/rigor/window_sweep.py --config <config.json> --windows 30 60 90 120` |
+| `asymmetry_analysis.py` | Bull vs Bear FVG asymmetry analysis (Gap 6) | `python scripts/rigor/asymmetry_analysis.py --pred-dir reports/rigor/<ts>/` |
+| `bootstrap_ci.py` | Block bootstrap confidence intervals (Gap 10) | `python scripts/rigor/bootstrap_ci.py --predictions <preds.npz>` |
+| `shap_xgb.py` | SHAP feature importance analysis (Gap 5) | `python scripts/rigor/shap_xgb.py --checkpoint <model.ubj>` |
+
+### Main CLIs (`scripts/`)
+
+| Script | Purpose | Typical command |
+|--------|---------|-----------------|
+| `inspect_models.py` | Offline model inspection on test set with TP/SL outcome simulation | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` |
+| `paper_trade.py` | Live paper trading via Alpaca (one process per model) | `python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001` |
 
 ## Tools / external services
 
@@ -240,7 +280,7 @@ sequenceDiagram
 | `torch` | `src/models/lstm.py`, `src/inspect/adapters/lstm_adapter.py` | LSTM training + inference |
 | `xgboost` | `src/models/xgboost_baseline.py`, `src/inspect/adapters/_xgb_worker.py` | Gradient boosting baseline |
 | `plotly` | `src/data/annotate.py`, `src/inspect/viz.py` | Candlestick visualisation |
-| `sklearn` | `src/inspect/stats.py`, `scripts/train_xgboost.py` | F1, confusion, train utils |
+| `sklearn` | `src/inspect/stats.py`, `scripts/training/train_xgboost.py` | F1, confusion, train utils |
 | `pytest` | `tests/` | All unit + integration tests |
 
 ## Where artifacts land
