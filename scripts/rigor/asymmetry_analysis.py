@@ -28,10 +28,14 @@ sys.path.insert(0, str(ROOT))
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bull vs Bear asymmetry analysis")
     parser.add_argument("--pred-dir", required=True, type=Path,
-                        help="Directory containing lstm_seed*_preds.npz files")
+                        help="Directory containing <model>_seed*_preds.npz files")
+    parser.add_argument("--model", default="lstm", choices=["lstm", "cnn_lstm", "xgb", "xgboost"],
+                        help="Model prefix to glob for (default: lstm)")
     parser.add_argument("--output-dir", type=Path, default=Path("reports/rigor"))
     parser.add_argument("--data-dir", type=Path, default=Path("data/processed"))
     args = parser.parse_args()
+
+    model_prefix = "xgb" if args.model in ("xgb", "xgboost") else args.model
 
     pred_dir = Path(args.pred_dir)
     if not pred_dir.is_absolute():
@@ -41,10 +45,10 @@ def main() -> None:
     ts_dir = timestamped_dir(ROOT / args.output_dir)
     data_dir = ROOT / args.data_dir
 
-    # Find all lstm WeightedCE seed prediction files
-    pred_files = sorted(pred_dir.glob("lstm_seed*_preds.npz"))
+    # Find all seed prediction files for this model
+    pred_files = sorted(pred_dir.glob(f"{model_prefix}_seed*_preds.npz"))
     if not pred_files:
-        print(f"No lstm_seed*_preds.npz files found in {pred_dir}")
+        print(f"No {model_prefix}_seed*_preds.npz files found in {pred_dir}")
         sys.exit(1)
 
     print(f"Found {len(pred_files)} seed prediction files")

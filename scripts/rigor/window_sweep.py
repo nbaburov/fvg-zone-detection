@@ -29,9 +29,11 @@ def _is_yaml_path(path: Path) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Window size sweep for LSTM")
+    parser = argparse.ArgumentParser(description="Window size sweep for LSTM or CNN-LSTM")
     parser.add_argument("--config", required=True, type=Path,
                         help="Path to experiments/foo.yaml or legacy best_lstm_config.json")
+    parser.add_argument("--model", default=None, choices=["lstm", "cnn_lstm"],
+                        help="Model type override (default: inferred from config arch field)")
     parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
                         metavar="key=value",
                         help='Override config fields: --set "train.seeds=[42]"')
@@ -80,6 +82,7 @@ def main() -> None:
         hp["batch_size"] = cfg.train.batch_size
         hp["lr"] = cfg.train.lr
         hp["weight_decay"] = cfg.train.weight_decay
+        model_arch = args.model or cfg.model.arch
     else:
         with config_path.open() as fh:
             hyperparams = json.load(fh)
@@ -89,6 +92,7 @@ def main() -> None:
         patience = args.patience if args.patience is not None else 15
         data_dir = ROOT / (args.data_dir or Path("data/processed"))
         output_dir = ROOT / (args.output_dir or Path("reports/rigor"))
+        model_arch = args.model or "lstm"
 
     import pandas as pd
     import torch
@@ -98,6 +102,7 @@ def main() -> None:
     from src.data.labels import LABELLERS
     from src.data.window import SMCWindowDataset
     from src.models.lstm import FVGLSTMClassifier
+    from src.models.cnn_lstm import FVGCNNLSTMClassifier
     from src.training.early_stop import EarlyStop
     from src.training.loss import WeightedCE
     from src.training.train_utils import set_seed
@@ -136,13 +141,26 @@ def main() -> None:
         val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
         test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
 
-        model = FVGLSTMClassifier(
-            input_size=5,
-            hidden_size=int(hp.get("hidden_size", 64)),
-            num_layers=int(hp.get("num_layers", 2)),
-            dropout=float(hp.get("dropout", 0.3)) if int(hp.get("num_layers", 2)) > 1 else 0.0,
-            head_dropout=float(hp.get("head_dropout", 0.5)),
-        ).to(device)
+        if model_arch == "cnn_lstm":
+            model = FVGCNNLSTMClassifier(
+                conv_filters=int(hp.get("conv_filters", 32)),
+                kernel_size=int(hp.get("kernel_size", 3)),
+                n_conv_layers=int(hp.get("n_conv_layers", 2)),
+                use_pool=bool(hp.get("use_pool", False)),
+                pool_type=str(hp.get("pool_type", "max")),
+                lstm_hidden=int(hp.get("lstm_hidden", 64)),
+                lstm_layers=int(hp.get("lstm_layers", 1)),
+                dropout=float(hp.get("dropout", 0.318)),
+                head_dropout=float(hp.get("head_dropout", 0.526)),
+            ).to(device)
+        else:
+            model = FVGLSTMClassifier(
+                input_size=5,
+                hidden_size=int(hp.get("hidden_size", 64)),
+                num_layers=int(hp.get("num_layers", 2)),
+                dropout=float(hp.get("dropout", 0.3)) if int(hp.get("num_layers", 2)) > 1 else 0.0,
+                head_dropout=float(hp.get("head_dropout", 0.5)),
+            ).to(device)
 
         criterion = WeightedCE(weights.to(device))
         lr = float(hp.get("lr", 1e-3))
@@ -227,7 +245,7 @@ def main() -> None:
                                   mode="lines+markers", name="Val Macro F1"))
         fig.add_trace(go.Scatter(x=ws, y=[r["test_macro_f1"] for r in results],
                                   mode="lines+markers", name="Test Macro F1"))
-        fig.update_layout(title="Window Size Sensitivity (LSTM)", xaxis_title="Window Size",
+        fig.update_layout(title=f"Window Size Sensitivity ({model_arch.upper()})", xaxis_title="Window Size",
                           yaxis_title="Macro F1")
         html_path = ts_dir / "window_sweep.html"
         fig.write_html(str(html_path))

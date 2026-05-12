@@ -62,6 +62,32 @@ Used by `WeightedCE` in `src/training/loss.py`. No oversampling.
 | Bear F1 | 0.392 |
 | Best val Macro F1 | 0.637 |
 
+### CNN-LSTM — `checkpoints/cnn_lstm/cnn_lstm_seed42.pt`
+
+| Attribute | Value |
+|-----------|-------|
+| Architecture | 2× Conv1d(5→16, k=5) + BN + ReLU → 2-layer LSTM(16→32) → FC(32→3) |
+| Dropout | 0.2217 (LSTM inter-layer), 0.3624 (head) |
+| Parameters | ~29k |
+| Input shape | `(batch, 60, 5)` — normalised per-window OHLCV |
+| Output | 3-class logits `{none, bull, bear}` |
+| Loss | WeightedCE (inverse-freq weights) |
+| Optimiser | Adam, lr 7.31e-4, weight_decay 7.48e-6 |
+| Early stop | Val Macro-F1, patience 15 |
+| Device | MPS (Apple Silicon, per seed_sweep default) |
+| Seed | 42 |
+| Trained | 2026-05-13 |
+| HP source | Optuna G1 (6 complete / 12 trials, 60min cap, best val F1 0.6440) |
+
+**Test results (seed42, from `cnn_lstm_seed42.meta.json`):**
+
+| Metric | Value |
+|--------|-------|
+| Macro F1 | **0.618** |
+| Bull F1 | 0.444 |
+| Bear F1 | 0.434 |
+| Best val Macro F1 | 0.608 |
+
 ### XGBoost — `checkpoints/xgboost/xgb_seed42.ubj`
 
 | Attribute | Value |
@@ -270,6 +296,121 @@ Artifact: `reports/rigor/2026-05-13/G10/bootstrap_ci_lstm.json`, `bootstrap_ci_x
 
 ---
 
+## CNN-LSTM Rigor Sprint — 2026-05-13
+
+Sprint basis: G1 HP (6 Optuna trials, 60min cap), 5 seeds, ValidFVG labels.
+
+**G1 best HP (val F1 = 0.6440, trial 0):**
+
+| Param | Value |
+|-------|-------|
+| n_conv_layers | 2 |
+| conv_filters | 16 |
+| kernel_size | 5 |
+| use_pool | false |
+| lstm_hidden | 32 |
+| lstm_layers | 2 |
+| dropout | 0.2217 |
+| head_dropout | 0.3624 |
+| lr | 7.31e-4 |
+| weight_decay | 7.48e-6 |
+| batch_size | 16 |
+
+Config: `experiments/cnn_lstm_g1.yaml`. Artifact: `reports/rigor/2026-05-13/cnn_lstm_G1/best_hp_cnn_lstm.json`
+
+### G2 — Seed Variance (5 seeds)
+
+| Seed | Test Macro F1 | Best Val Macro F1 |
+|------|--------------|------------------|
+| 0 | 0.583 | 0.614 |
+| 17 | 0.620 | 0.583 |
+| 42 | 0.618 | 0.608 |
+| 123 | 0.647 | 0.613 |
+| 2024 | 0.603 | 0.578 |
+| **mean ± std** | **0.614 ± 0.021** | — |
+
+**Gate G2: PASS** — std=0.021 < 0.10, mean=0.614 > LSTM baseline 0.599.
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G2/multiseed_summary.json`
+
+### G4 — Decision Threshold Tuning
+
+| Model | Mean Δ Macro F1 | Std | Verdict |
+|-------|----------------|-----|---------|
+| CNN-LSTM | +0.006 | 0.007 | Marginal, not worth deploying |
+
+Argmax decoding retained. Threshold tuning provides negligible uplift.
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G4/threshold_tuning.json`
+
+### G6 — Bull vs Bear Asymmetry (5 seeds)
+
+| Metric | Value |
+|--------|-------|
+| Mean bull F1 | 0.451 ± 0.013 |
+| Mean bear F1 | 0.417 ± 0.059 |
+| Mean bull−bear gap | +0.034 |
+| Systematic asymmetry (gap >0.05 all seeds) | False |
+
+Bear has higher variance. FP bear gap mean (1.54) < TP bear gap mean (2.56) — model confuses smaller bear gaps.
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G6/`
+
+### G7 — Window Size Sensitivity (seed42, patience=7)
+
+| W | Val F1 | Test F1 | effective_n |
+|---|--------|---------|-------------|
+| 30 | 0.593 | 0.533 | 174 |
+| **60 (canonical)** | **0.580** | **0.576** | **86** |
+| 90 | 0.630 | 0.585 | 57 |
+| 120 | 0.608 | 0.559 | 42 |
+
+Best val F1 at W=90, but lower sample coverage. W=60 canonical retained.
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G7/`
+
+### G9 — Regularisation Ablation (5 seeds)
+
+| Config | Mean Macro F1 | Std | Δ vs control |
+|--------|--------------|-----|--------------|
+| Control (dropout + L2) | 0.614 | 0.021 | — |
+| No dropout | 0.623 | 0.012 | **+0.009** |
+| No L2 | 0.580 | 0.035 | −0.034 |
+| Both off | 0.613 | 0.014 | −0.001 |
+
+**Notable:** removing dropout *improves* mean F1 (+0.009) and reduces variance. Suggests the G1 dropout (0.2217) may be slightly over-regularising given the already-small model (29k params). L2 removal hurts. Full regularisation retained for consistency with LSTM sprint.
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G9/`
+
+### G10 — Bootstrap CI (95%)
+
+Block bootstrap (1000 resamples, block_size=60, effective_n=86).
+
+| Model | Mean macro F1 | 95% CI | Bull CI | Bear CI |
+|-------|--------------|--------|---------|---------|
+| CNN-LSTM (5-seed mean) | 0.614 | [0.576, 0.649] | [0.370, 0.520] | [0.317, 0.500] |
+
+Artifact: `reports/rigor/2026-05-13/cnn_lstm_G10/bootstrap_ci_cnn_lstm.json`
+
+### CNN-LSTM Sprint Summary
+
+| Gap | Finding | Verdict |
+|-----|---------|---------|
+| G1 — HP tuning | Best val F1 0.644 (6 trials, 60min cap) | Tuned |
+| G2 — Seed variance | 0.614 ± 0.021; std < LSTM (0.025) | PASS |
+| G4 — Threshold | +0.006 Δ — negligible | Argmax kept |
+| G6 — Asymmetry | +0.034 bull>bear gap, not systematic | No fix needed |
+| G7 — Window sweep | W=60 retained; W=90 slightly better but lower eff_n | W=60 canonical |
+| G9 — Reg ablation | No-dropout improves (+0.009); L2 critical (−0.034 without) | Reg retained |
+| G10 — Bootstrap CI | 95% CI [0.576, 0.649] | Rigorous uncertainty |
+
+**vs LSTM 0.599: +0.015 (+2.5%)**
+**vs XGB 0.721: −0.107 (−14.8%)**
+
+Inspect report: `reports/inspect/2026-05-13_004532/`
+
+---
+
 ## Dual-FVG Baseline Comparison
 
 > Raw FVG and ValidFVG measure different problems. Raw FVG higher F1 is expected — not a regression.
@@ -304,6 +445,14 @@ LSTM and XGB Plotly timelines + top-20 disagreement window charts generated 2026
 
 ## Model progression
 
-XGBoost baseline → LSTM → **CNN-LSTM (next)** → xLSTM → Transformer.
+XGBoost baseline → LSTM → **CNN-LSTM** → xLSTM → Transformer.
 
-Current best: XGB (0.721 mean macro F1 on ValidFVG). LSTM baseline established at 0.599 mean macro F1.
+| Model | Mean Macro F1 | Status |
+|-------|--------------|--------|
+| XGBoost | 0.721 | Complete (G1–G10 rigor) |
+| CNN-LSTM | 0.614 | Complete (G1–G10 rigor) |
+| LSTM | 0.599 | Complete (G1–G10 rigor) |
+| xLSTM | — | Not started |
+| Transformer | — | Not started |
+
+Current best: XGB (0.721). CNN-LSTM beats LSTM by +0.015.

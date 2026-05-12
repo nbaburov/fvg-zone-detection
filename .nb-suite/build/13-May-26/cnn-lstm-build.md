@@ -47,13 +47,40 @@
 
 ---
 
-## Phase 2 — Pending (Optuna G1 + multi-seed G2)
+## Phase 2 — G1 Optuna (sealed)
 
-Awaiting user approval after Phase 1 gate.
+G1 Optuna sealed at 6/12 trials (60min cap). Best val F1 = 0.6440, trial 0. Config written to `experiments/cnn_lstm_g1.yaml`.
+
+---
+
+## Phase 3 — G2–G10 Rigor Sprint
+
+### Step 1 — cnn_lstm_g1.yaml populated
+Overwrote placeholder with G1 best HP. Verified load: kernel_size=5, lr=0.000731.
+
+### Step 2 — G2 Multi-seed
+Issue: seed42 had stale base-config checkpoint (skip logic fired). Retrained standalone after backing up old checkpoint. Corrected G2: **0.614 ± 0.021** — Gate PASS.
+
+### Step 3 — Phase 3 gates
+- **G4** threshold: +0.006 Δ (negligible). `threshold_multiseed.py` extended for CNN-LSTM (meta-driven HP).
+- **G6** asymmetry: bull 0.451±0.013 vs bear 0.417±0.059, gap +0.034, not systematic.
+- **G7** window sweep: best val W=90, W=60 retained. `window_sweep.py` extended for CNN-LSTM.
+- **G9** reg ablation: no-dropout **improves** (+0.009, lower variance); no-L2 hurts (−0.034). Full reg retained.
+- **G10** bootstrap CI: 95% [0.576, 0.649]. `bootstrap_ci_multiseed.py` extended.
+
+### Step 4 — Phase 4 docs + inspect
+- `src/inspect/adapters/cnn_lstm_adapter.py` — written, auto-discovered
+- Inspect: `reports/inspect/2026-05-13_004532/` (F1_macro=0.439 on seed42)
+- `docs/models-status.md` — CNN-LSTM canonical entry + full sprint section
+
+### Tests
+Full suite: **284/284 pass** throughout.
 
 ---
 
 ## Open flags
 
-- Pool output length: with `use_pool=True, padding=0`, L=60 → 59 per pool layer. Two conv layers with pool → 58. LSTM handles variable T — not a correctness issue. Document in YAML if pool is selected in G1.
-- `tune_cnn_lstm.py` not yet created — Phase 2 task.
+- Pool output length: with `use_pool=True, padding=0`, L=60 → 59 per pool layer. Two conv layers with pool → 58. LSTM handles variable T — not a correctness issue.
+- seed42 backup checkpoints in `checkpoints/cnn_lstm/cnn_lstm_seed42_base_backup.*` — keep until next full sprint.
+- G9 no-dropout finding: if pursuing further, consider retune without dropout constraint.
+- W=90 sensitivity: CNN-LSTM may benefit from W=90 sweep, but not explored this sprint.

@@ -1,6 +1,6 @@
 """threshold_multiseed.py — Per-seed threshold tuning, aggregated to G4 output (Gap 4).
 
-Runs threshold_sweep logic for each LSTM seed checkpoint.
+Runs threshold_sweep logic for each seed checkpoint (LSTM or CNN-LSTM).
 Aggregates delta macro F1 across seeds.
 Writes G4/threshold_tuning.json.
 
@@ -20,24 +20,61 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def get_lstm_probas(model_path: Path, df, labeller, device):
-    """Load LSTM checkpoint and get probabilities for a dataframe."""
+def _get_probas(model_path: Path, df, labeller, device, model_type: str, window_size: int = 60):
+    """Load checkpoint and get softmax probabilities for a dataframe."""
     import torch
     from torch.utils.data import DataLoader
     from src.data.window import SMCWindowDataset
-    from src.models.lstm import FVGLSTMClassifier
+
+    ds = SMCWindowDataset(df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
+    loader = DataLoader(ds, batch_size=256, shuffle=False, num_workers=0)
 
     state = torch.load(model_path, map_location="cpu", weights_only=True)
-    hidden_size = state["lstm.weight_ih_l0"].shape[0] // 4
-    num_layers = sum(1 for k in state if k.startswith("lstm.weight_ih_l"))
-    model = FVGLSTMClassifier(hidden_size=hidden_size, num_layers=num_layers)
+
+    # Read HP from meta sidecar (avoids fragile state-dict key introspection)
+    meta_path = model_path.with_suffix(".meta.json")
+    hp: dict = {}
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        hp = meta.get("hyperparams", {})
+        if not hp:
+            # Older base-run meta stored HP at top level
+            for k in ("hidden_size", "num_layers", "conv_filters", "kernel_size",
+                      "n_conv_layers", "use_pool", "lstm_hidden", "lstm_layers",
+                      "dropout", "head_dropout"):
+                if k in meta:
+                    hp[k] = meta[k]
+
+    if model_type == "lstm":
+        from src.models.lstm import FVGLSTMClassifier
+        model = FVGLSTMClassifier(
+            hidden_size=int(hp.get("hidden_size", 64)),
+            num_layers=int(hp.get("num_layers", 2)),
+            dropout=float(hp.get("dropout", 0.3)),
+            head_dropout=float(hp.get("head_dropout", 0.5)),
+        )
+    elif model_type == "cnn_lstm":
+        from src.models.cnn_lstm import FVGCNNLSTMClassifier
+        model = FVGCNNLSTMClassifier(
+            conv_filters=int(hp.get("conv_filters", 32)),
+            kernel_size=int(hp.get("kernel_size", 3)),
+            n_conv_layers=int(hp.get("n_conv_layers", 2)),
+            use_pool=bool(hp.get("use_pool", False)),
+            pool_type=str(hp.get("pool_type", "max")),
+            lstm_hidden=int(hp.get("lstm_hidden", 64)),
+            lstm_layers=int(hp.get("lstm_layers", 1)),
+            dropout=float(hp.get("dropout", 0.318)),
+            head_dropout=float(hp.get("head_dropout", 0.526)),
+        )
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+
     model.load_state_dict(state)
     model.to(device)
+    model.eval()
 
-    ds = SMCWindowDataset(df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
-    loader = DataLoader(ds, batch_size=256, shuffle=False, num_workers=0)
     probas, labels = [], []
-
     with torch.no_grad():
         for x, y in loader:
             logits = model(x.to(device))
@@ -50,6 +87,8 @@ def get_lstm_probas(model_path: Path, df, labeller, device):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="lstm", choices=["lstm", "cnn_lstm"],
+                        help="Model type to evaluate (default: lstm)")
     parser.add_argument("--config", type=Path, default=None,
                         help="Path to experiments/foo.yaml (optional — sets data_dir, seeds, checkpoint_dir)")
     parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],
@@ -62,6 +101,8 @@ def main() -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=None,
                         help="[Legacy] seed list. Use --set 'train.seeds=[...]' with YAML config.")
     args = parser.parse_args()
+
+    model_type = args.model
 
     # Resolve config (optional)
     cfg = None
@@ -82,11 +123,13 @@ def main() -> None:
             overrides.setdefault("train.seeds", args.seeds)
         cfg = load_experiment(config_path, overrides or None)
 
+    default_ckpt_subdir = model_type  # "lstm" or "cnn_lstm"
     checkpoint_dir = args.checkpoint_dir or (
-        Path(cfg.runtime.checkpoint_dir) / "lstm" if cfg else Path("checkpoints/lstm")
+        Path(cfg.runtime.checkpoint_dir) / default_ckpt_subdir if cfg else Path(f"checkpoints/{default_ckpt_subdir}")
     )
     data_dir_path = args.data_dir or (cfg.data.data_dir if cfg else Path("data/processed"))
     seeds = (cfg.train.seeds if cfg else None) or args.seeds or [0, 17, 42, 123, 2024]
+    window_size = int(cfg.data.window_size) if cfg else 60
 
     ckpt_dir = ROOT / checkpoint_dir
     data_dir = ROOT / data_dir_path
@@ -116,7 +159,7 @@ def main() -> None:
     deltas: list[float] = []
 
     for seed in seeds:
-        ckpt = ckpt_dir / f"lstm_seed{seed}.pt"
+        ckpt = ckpt_dir / f"{model_type}_seed{seed}.pt"
         if not ckpt.exists():
             print(f"WARNING: checkpoint not found: {ckpt} — skipping seed {seed}")
             continue
@@ -125,11 +168,11 @@ def main() -> None:
 
         # Get val probabilities (threshold search — val only, no test leakage)
         print("  Getting val probas...")
-        val_proba, val_true = get_lstm_probas(ckpt, val_df, labeller, device)
+        val_proba, val_true = _get_probas(ckpt, val_df, labeller, device, model_type, window_size)
 
         # Get test probabilities (final measurement only, after thresholds are fixed)
         print("  Getting test probas...")
-        test_proba, test_true = get_lstm_probas(ckpt, test_df, labeller, device)
+        test_proba, test_true = _get_probas(ckpt, test_df, labeller, device, model_type, window_size)
 
         # Threshold optimisation on val ONLY
         curves = compute_pr_curves(val_true, val_proba)

@@ -20,6 +20,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from src.models.cnn_lstm import FVGCNNLSTMClassifier
 from src.models.lstm import FVGLSTMClassifier
 from src.training.early_stop import EarlyStop
 from src.training.loss import WeightedCE
@@ -190,6 +191,112 @@ class XGBObjective:
         y_pred = clf.predict(self.X_val)
         macro_f1 = float(f1_score(self.y_val, y_pred, average="macro", zero_division=0.0))
         return macro_f1
+
+
+# ---------------------------------------------------------------------------
+# CNN-LSTM Objective
+# ---------------------------------------------------------------------------
+
+class CNNLSTMObjective:
+    """Optuna callable for CNN-LSTM hyperparameter search (11-dimensional).
+
+    Uses train + val loaders only. Test parquet NEVER loaded here.
+    Reports intermediate val Macro F1 per epoch so MedianPruner can prune.
+    """
+
+    def __init__(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        class_weights: torch.Tensor,
+        device: torch.device,
+        max_epochs: int = 50,
+        patience: int = 10,
+    ) -> None:
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.class_weights = class_weights
+        self.device = device
+        self.max_epochs = max_epochs
+        self.patience = patience
+
+    def __call__(self, trial: optuna.Trial) -> float:
+        set_seed(42)  # fixed seed: search measures HP variance, not seed variance
+
+        # Sample hyperparameters — 11-dimensional space
+        n_conv_layers = trial.suggest_categorical("n_conv_layers", [1, 2, 3])
+        conv_filters = trial.suggest_categorical("conv_filters", [16, 32, 64])
+        kernel_size = trial.suggest_categorical("kernel_size", [3, 5, 7])
+        use_pool = trial.suggest_categorical("use_pool", [False, True])
+        lstm_hidden = trial.suggest_categorical("lstm_hidden", [32, 64, 128])
+        lstm_layers = trial.suggest_categorical("lstm_layers", [1, 2])
+        dropout = trial.suggest_float("dropout", 0.1, 0.5)
+        head_dropout = trial.suggest_float("head_dropout", 0.1, 0.6)
+        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+
+        # Rebuild loaders with trial batch size
+        train_ds = self.train_loader.dataset
+        val_ds = self.val_loader.dataset
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=False,
+            drop_last=True,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=256,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=False,
+        )
+
+        model = FVGCNNLSTMClassifier(
+            conv_filters=conv_filters,
+            kernel_size=kernel_size,
+            n_conv_layers=n_conv_layers,
+            use_pool=bool(use_pool),
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+            head_dropout=head_dropout,
+        ).to(self.device)
+
+        criterion = WeightedCE(self.class_weights.to(self.device))
+        optimiser = torch.optim.Adam(
+            model.parameters(), lr=lr, weight_decay=weight_decay
+        )
+        early_stop = EarlyStop(patience=self.patience, mode="max")
+
+        best_val_f1 = 0.0
+
+        for epoch in range(self.max_epochs):
+            model.train()
+            for x_batch, y_batch in train_loader:
+                x_batch = x_batch.to(self.device)
+                y_batch = torch.as_tensor(y_batch, device=self.device)
+                optimiser.zero_grad()
+                logits = model(x_batch)
+                loss = criterion(logits, y_batch)
+                loss.backward()
+                optimiser.step()
+
+            val_f1 = _eval_macro_f1(model, val_loader, self.device)
+            if val_f1 > best_val_f1:
+                best_val_f1 = val_f1
+
+            trial.report(val_f1, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+            if early_stop.update(val_f1):
+                break
+
+        return best_val_f1
 
 
 # ---------------------------------------------------------------------------

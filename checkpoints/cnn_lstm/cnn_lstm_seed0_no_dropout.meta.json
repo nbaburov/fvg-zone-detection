@@ -4,15 +4,15 @@
   "python_version": "3.12.13",
   "platform": "macOS-26.3.1-arm64-arm-64bit",
   "device": "mps",
-  "seed": 42,
-  "timestamp": "2026-05-12T22:26:29.142515+00:00",
-  "best_epoch": 20,
-  "best_val_macro_f1": 0.6077521917858052,
-  "test_macro_f1": 0.6177026449556616,
+  "seed": 0,
+  "timestamp": "2026-05-12T22:29:24.236248+00:00",
+  "best_epoch": 42,
+  "best_val_macro_f1": 0.6390638400731716,
+  "test_macro_f1": 0.6282461497900284,
   "test_per_class_f1": [
-    0.9745549632907573,
-    0.4444444444444444,
-    0.43410852713178294
+    0.9712492407369913,
+    0.525,
+    0.38848920863309355
   ],
   "hyperparams": {
     "n_conv_layers": 2,
