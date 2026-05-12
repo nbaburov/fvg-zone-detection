@@ -1,0 +1,17 @@
+# xgb_g1.yaml — G1 Optuna best HP for XGBoost on ValidFVG target.
+# HP source: reports/rigor/2026-05-13/G1/best_hp_xgb.json (trial 31, val_macro_f1=0.6908)
+name: xgb_g1_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: xgb
+  n_estimators: 513
+  max_depth: 4
+  learning_rate: 0.1311447837531049
+  min_child_weight: 1
+  subsample: 0.826439213403869
+  colsample_bytree: 0.7249466284356196
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  device: cpu

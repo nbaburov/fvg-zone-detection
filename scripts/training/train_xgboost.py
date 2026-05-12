@@ -66,6 +66,20 @@ def parse_args() -> argparse.Namespace:
             "rawfvg: load class_weights_rawfvg.json from splits dir, save as xgb_seed{N}_rawfvg.ubj."
         ),
     )
+    # Config-driven path (Phase 1 addition) — optional; backwards compat when omitted
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to experiment YAML. When provided, XGB HP from YAML override defaults.",
+    )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="set_args",
+        metavar="KEY=VALUE",
+        help="Override config field (dotted key). Only used when --config is provided.",
+    )
     return parser.parse_args()
 
 
@@ -106,6 +120,30 @@ def main() -> None:
     args = parse_args()
     seed = args.seed
     output_dir = REPO / args.output_dir
+
+    # Config-driven HP — load YAML if --config provided, else use XGBoostFVGClassifier defaults
+    _xgb_hp: dict | None = None
+    if args.config is not None:
+        import ast as _ast
+        from src.config import load_experiment as _load_exp
+        _overrides: dict = {}
+        for _item in args.set_args:
+            if "=" in _item:
+                _k, _raw = _item.split("=", 1)
+                try:
+                    _overrides[_k.strip()] = _ast.literal_eval(_raw)
+                except (ValueError, SyntaxError):
+                    _overrides[_k.strip()] = _raw
+        _cfg = _load_exp(args.config, overrides=_overrides if _overrides else None)
+        # Override splits/label from config if not explicitly set on CLI
+        if args.splits == "default" and _cfg.data.splits != "default":
+            args.splits = _cfg.data.splits
+        _label_map = {"fvg": "rawfvg", "fvg_valid": "validfvg"}
+        _cfg_label = _label_map.get(_cfg.data.labeller, "validfvg")
+        if args.label == "validfvg" and _cfg_label != "validfvg":
+            args.label = _cfg_label
+        _xgb_hp = _cfg.model.model_dump(exclude={"arch"})
+        print(f"Config loaded: {_cfg.name} (HP from YAML: {_xgb_hp})")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     np.random.seed(seed)
@@ -199,7 +237,7 @@ def main() -> None:
     # 5. Train
     # ------------------------------------------------------------------
     print("\nTraining XGBoostFVGClassifier...")
-    model = XGBoostFVGClassifier()
+    model = XGBoostFVGClassifier(params=_xgb_hp)  # None = defaults; YAML HP when --config provided
     model.fit(X_train, y_train, X_val, y_val, sample_weight=sample_weight)
 
     n_used = model.n_estimators_used

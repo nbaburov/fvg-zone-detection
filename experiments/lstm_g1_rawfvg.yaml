@@ -1,0 +1,23 @@
+# lstm_g1_rawfvg.yaml — G1 LSTM HP on raw FVG target (comparison baseline).
+# Same HP as lstm_g1.yaml but labeller=fvg (raw geometric FVG, no validity criteria).
+name: lstm_g1_rawfvg
+data:
+  labeller: fvg
+  window_size: 60
+model:
+  arch: lstm
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.31753016617848756
+  head_dropout: 0.526205942764976
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 5.301506411688119e-04
+  weight_decay: 3.9155649921300636e-05
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

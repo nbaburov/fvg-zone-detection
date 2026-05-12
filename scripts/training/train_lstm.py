@@ -94,6 +94,20 @@ def parse_args() -> argparse.Namespace:
             "rawfvg: load class_weights_rawfvg.json from splits dir, save as lstm_seed{N}_rawfvg.pt."
         ),
     )
+    # Config-driven path (Phase 1 addition) — optional; backwards compat when omitted
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Path to experiment YAML. When provided, HP from YAML override script constants.",
+    )
+    p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="set_args",
+        metavar="KEY=VALUE",
+        help="Override config field (dotted key). Only used when --config is provided.",
+    )
     return p.parse_args()
 
 
@@ -546,6 +560,33 @@ Confusion matrix (test) — rows=actual, cols=predicted (none/bull/bear):
 
 def main() -> None:
     args = parse_args()
+
+    # Config-driven path: when --config provided, delegate to unified train.py.
+    # Backwards compat: all legacy flags still work when --config is omitted.
+    if args.config is not None:
+        import ast as _ast
+        from src.config import load_experiment as _load_experiment
+
+        _overrides: dict = {}
+        for _item in args.set_args:
+            if "=" in _item:
+                _k, _raw = _item.split("=", 1)
+                try:
+                    _overrides[_k.strip()] = _ast.literal_eval(_raw)
+                except (ValueError, SyntaxError):
+                    _overrides[_k.strip()] = _raw
+        _overrides["train.seeds"] = [args.seed]
+
+        _cfg = _load_experiment(args.config, overrides=_overrides if _overrides else None)
+        from scripts.training.train import _train_lstm as _cfg_train_lstm
+        _cfg_train_lstm(_cfg, seed=args.seed, debug=args.debug)
+        return
+
+    # ---------------------------------------------------------------------------
+    # Legacy path — no --config provided. Uses module-level constants as before.
+    # Fallback defaults when --config not provided (ignored when config is loaded):
+    # LR=3e-3, WEIGHT_DECAY=1e-2, BATCH_TRAIN=32 (stale pre-tuning defaults)
+    # ---------------------------------------------------------------------------
     set_seed(args.seed)
 
     device = select_device(args.device)

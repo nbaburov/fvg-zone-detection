@@ -1,0 +1,24 @@
+# lstm_g1.yaml — G1 Optuna best HP for LSTM on ValidFVG target.
+# HP source: reports/rigor/2026-05-13/G1/best_hp_lstm.json (trial 42, val_macro_f1=0.6373)
+# Optimiser: Adam (matches LSTMObjective tuning search — not AdamW+OneCycleLR).
+name: lstm_g1_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: lstm
+  hidden_size: 128
+  num_layers: 1
+  dropout: 0.31753016617848756
+  head_dropout: 0.526205942764976
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 5.301506411688119e-04
+  weight_decay: 3.9155649921300636e-05
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu
