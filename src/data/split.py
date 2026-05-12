@@ -13,6 +13,15 @@ SPLIT_BOUNDARIES: dict[str, str] = {
     "val_start": "2022-01-01",
     "val_end": "2022-12-31",
     "test_start": "2023-01-01",
+    "test_end": "2025-12-31",
+}
+
+# Legacy boundaries (2018-2024 dataset) — keep for reference and backwards-compat testing
+SPLIT_BOUNDARIES_2018_2024: dict[str, str] = {
+    "train_end": "2021-12-31",
+    "val_start": "2022-01-01",
+    "val_end": "2022-12-31",
+    "test_start": "2023-01-01",
     "test_end": "2024-12-31",
 }
 

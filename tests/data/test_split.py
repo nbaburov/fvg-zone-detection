@@ -110,23 +110,26 @@ def test_no_index_overlap_between_splits():
 
 
 def test_post_test_end_rows_are_clipped():
-    """Rows after test_end (e.g. 2025-01-02) must be excluded; invariant holds on filtered_df."""
+    """Rows after test_end must be excluded; invariant holds on filtered_df.
+
+    test_end is now 2025-12-31, so we inject a bar at 2026-01-02 (outside boundary).
+    """
     df = _make_full_dataset()
 
-    # Inject one bar at 2025-01-02 — outside test_end=2024-12-31
-    future_idx = pd.DatetimeIndex([pd.Timestamp("2025-01-02", tz="America/New_York")])
+    # Inject one bar at 2026-01-02 — outside test_end=2025-12-31
+    future_idx = pd.DatetimeIndex([pd.Timestamp("2026-01-02", tz="America/New_York")])
     future_row = df.iloc[[-1]].copy()
     future_row.index = future_idx
     df_with_future = pd.concat([df, future_row])
 
     train, val, test = temporal_split(df_with_future)
 
-    # The 2025-01-02 bar must NOT appear in any split
+    # The 2026-01-02 bar must NOT appear in any split
     all_split_idx = set(train.index) | set(val.index) | set(test.index)
-    assert future_idx[0] not in all_split_idx, "2025-01-02 bar leaked into splits"
+    assert future_idx[0] not in all_split_idx, "2026-01-02 bar leaked into splits"
 
     # Row-count invariant holds against filtered (non-future) rows
-    filtered_count = len(df_with_future[df_with_future.index.normalize() <= pd.Timestamp("2024-12-31", tz="America/New_York")])
+    filtered_count = len(df_with_future[df_with_future.index.normalize() <= pd.Timestamp("2025-12-31", tz="America/New_York")])
     assert len(train) + len(val) + len(test) == filtered_count, (
         f"Row count mismatch after clip: {len(train)} + {len(val)} + {len(test)} != {filtered_count}"
     )

@@ -150,7 +150,7 @@ def _tag_session_type(df: pd.DataFrame) -> pd.DataFrame:
 
 def download_spy_h1(
     start: str = "2018-01-01",
-    end: str | None = None,
+    end: str | None = "2025-12-31",
     use_cache: bool = True,
     cache_path: str = "data/raw/spy_minute.parquet",
 ) -> pd.DataFrame:
@@ -170,11 +170,22 @@ def download_spy_h1(
     if use_cache and cache.exists():
         logger.info("Cache hit: loading minute bars from %s", cache)
         minute_df = pd.read_parquet(cache)
-        h1 = _resample_minute_to_h1(minute_df)
-        h1 = _validate_ohlc(h1)
-        h1 = _tag_session_type(h1)
-        _sanity_check_bar_count(h1, start, end)
-        return h1
+        # Guard against silent truncation when caller asks for a start earlier than cache covers.
+        cache_start = minute_df.index.min()
+        if cache_start.tz is not None:
+            cache_start = cache_start.tz_convert("UTC").tz_localize(None)
+        requested_start = pd.Timestamp(start)
+        if cache_start.date() > requested_start.date():
+            logger.warning(
+                "Cache starts %s but caller requested %s. Re-downloading.",
+                cache_start.date(), requested_start.date(),
+            )
+        else:
+            h1 = _resample_minute_to_h1(minute_df)
+            h1 = _validate_ohlc(h1)
+            h1 = _tag_session_type(h1)
+            _sanity_check_bar_count(h1, start, end)
+            return h1
 
     # Validate credentials before making any API call
     key, secret = _get_credentials()

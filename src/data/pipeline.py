@@ -50,6 +50,9 @@ def _compute_class_weights(
 def build_pipeline(
     labeller_name: str = "fvg",
     window_size: int = 60,
+    start: str = "2018-01-01",
+    end: str | None = "2025-12-31",
+    use_cache: bool = True,
 ) -> tuple[SMCWindowDataset, SMCWindowDataset, SMCWindowDataset, torch.Tensor]:
     """
     Full pipeline: download → label → split → window → return datasets + class weights.
@@ -73,7 +76,12 @@ def build_pipeline(
     labeller = labeller_cls()
 
     # Step 1: Get full labelled H1 DataFrame
-    full_df = build_labelled_dataset(labeller_name=labeller_name)
+    full_df = build_labelled_dataset(
+        labeller_name=labeller_name,
+        start=start,
+        end=end,
+        use_cache=use_cache,
+    )
 
     # Persist full dataset
     full_path = out_dir / "spy_h1.parquet"

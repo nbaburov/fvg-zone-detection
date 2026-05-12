@@ -26,7 +26,8 @@ def normalise_window(window: np.ndarray) -> np.ndarray:
 
     Pure function. No side effects. No state. No NaN in output.
     """
-    out = np.zeros((60, 5), dtype=np.float32)
+    n_bars = window.shape[0]
+    out = np.zeros((n_bars, 5), dtype=np.float32)
 
     # OHLC normalisation
     ohlc = window[:, :4].astype(np.float64)

@@ -22,6 +22,8 @@ def build_labelled_dataset(
     h1_cache_path: str = "data/raw/spy_minute.parquet",
     output_path: str = "data/processed/spy_h1.parquet",
     use_cache: bool = True,
+    start: str = "2018-01-01",
+    end: str | None = "2025-12-31",
 ) -> pd.DataFrame:
     """
     Returns H1 DataFrame with all columns from download_spy_h1()
@@ -35,7 +37,7 @@ def build_labelled_dataset(
 
     labeller = LABELLERS[labeller_name]()
 
-    df = download_spy_h1(use_cache=use_cache, cache_path=h1_cache_path)
+    df = download_spy_h1(start=start, end=end, use_cache=use_cache, cache_path=h1_cache_path)
 
     raw_labels = labeller.label(df)
     encoded_labels = labeller.encode(raw_labels)
