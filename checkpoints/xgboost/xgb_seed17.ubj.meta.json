@@ -1,10 +1,10 @@
 {
-  "seed": 42,
-  "test_macro_f1": 0.6316686406597066,
+  "seed": 17,
+  "test_macro_f1": 0.6373293092591338,
   "test_per_class_f1": [
-    0.8366191684559828,
-    0.530188679245283,
-    0.5281980742778541
+    0.828028028028028,
+    0.5523809523809524,
+    0.531578947368421
   ],
   "hyperparams": {
     "n_estimators": 527,
@@ -15,7 +15,7 @@
     "colsample_bytree": 0.727283522286177
   },
   "loss_type": "weighted_ce",
-  "n_estimators_used": 164,
+  "n_estimators_used": 130,
   "optuna_study": null,
   "optuna_trial_number": null,
   "threshold_config": null

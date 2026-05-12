@@ -12,18 +12,12 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Data caches (regeneratable, large)
-data/raw/*.parquet
-data/processed/*.parquet
-!data/raw/.gitkeep
-!data/processed/.gitkeep
+# Data + checkpoints + study DBs are tracked (small enough, frozen artefacts)
+# Total ~65MB across raw + processed + checkpoints — under GitHub 100MB/file limit.
+# Re-evaluate if a single file approaches 100MB (use git-lfs).
 
 # Notebook checkpoints
 .ipynb_checkpoints/
-
-# Trained model weights (large, regeneratable)
-models/*.pt
-models/*.pth
 
 # Logs
 logs/
