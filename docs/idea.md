@@ -20,7 +20,7 @@ Key structures:
 
 **Goal:** Deep learning system that automates the **FVG zone-detection sub-task** of SMC on SPY. Output = zone labels + confidence scores + interactive chart overlays.
 
-**Scope clarification (mandatory framing):** Project automates *identification* of FVG zones — the pattern-recognition primitive inside SMC. It does NOT automate SMC trading, which additionally requires multi-timeframe trade qualification (HTF bias, LTF entry trigger). Multi-TF qualification = explicit out-of-scope for MVP. See `.nb-suite/research/8-May-26/timeframe-deep.md`.
+**Scope clarification (mandatory framing):** Project automates *identification* of FVG zones — the pattern-recognition primitive inside SMC. It does NOT automate SMC trading, which additionally requires multi-timeframe trade qualification (HTF bias, LTF entry trigger). Multi-TF qualification = explicit out-of-scope for MVP. See `.nb/research/8-May-26/timeframe-deep.md`.
 
 **NOT price prediction.** Model identifies *what FVG zones exist and where*, not direction.
 
@@ -37,9 +37,9 @@ Key structures:
 
 ## Data
 
-- **Source:** SPY hourly OHLCV 2018–present via **Alpaca Markets free tier** (`alpaca-py` SDK, paper account, `adjustment="raw"`). ~13,500 candles target. (yfinance rejected 8-May-26 — Yahoo caps H1 history at 730 days; see `.nb-suite/research/8-May-26/data-source-validation.md`.)
-- **Timeframe:** **H1 single-frame.** FVG identification is a self-contained 3-candle geometric pattern in canonical SMC literature — multi-TF is used for trade qualification, not identification. H1 is the SMC zone-identification layer. ~13.5k candles fits LSTM/xLSTM minimum. Confirmed via Deep multi-perspective research: `.nb-suite/research/8-May-26/timeframe-deep.md`.
-- **Labels:** Generated programmatically via **custom vectorised FVG detector** (`src/data/label.py`). `smartmoneyconcepts` library rejected 8-May-26 — v0.0.27 confirmed to use 1-bar future lookahead (`shift(-1)`); PR #95 fix unmerged. Custom detector places label at index N+1 (first bar where 3-candle pattern is closed). Approach is still **weak supervision** (Snorkel-style programmatic labelling) — no manual annotation. See `.nb-suite/research/8-May-26/smc-library-validation.md`.
+- **Source:** SPY hourly OHLCV 2018–present via **Alpaca Markets free tier** (`alpaca-py` SDK, paper account, `adjustment="raw"`). ~13,500 candles target. (yfinance rejected 8-May-26 — Yahoo caps H1 history at 730 days; see `.nb/research/8-May-26/data-source-validation.md`.)
+- **Timeframe:** **H1 single-frame.** FVG identification is a self-contained 3-candle geometric pattern in canonical SMC literature — multi-TF is used for trade qualification, not identification. H1 is the SMC zone-identification layer. ~13.5k candles fits LSTM/xLSTM minimum. Confirmed via Deep multi-perspective research: `.nb/research/8-May-26/timeframe-deep.md`.
+- **Labels:** Generated programmatically via **custom vectorised FVG detector** (`src/data/label.py`). `smartmoneyconcepts` library rejected 8-May-26 — v0.0.27 confirmed to use 1-bar future lookahead (`shift(-1)`); PR #95 fix unmerged. Custom detector places label at index N+1 (first bar where 3-candle pattern is closed). Approach is still **weak supervision** (Snorkel-style programmatic labelling) — no manual annotation. See `.nb/research/8-May-26/smc-library-validation.md`.
 
 Multi-timeframe (H1 + Daily fusion) = optional extension. Cheapest path = broadcast Daily ATR + direction as 2 extra input features (~2.5 days). NOT Temporal Fusion Transformer. Trigger conditions: H1 baseline F1 > 0.45 AND val plateau AND regime-correlated errors.
 

@@ -1,7 +1,7 @@
-# Override global gitignore — track CLAUDE.md and .nb-suite for this project
+# Override global gitignore — track CLAUDE.md and .nb for this project
 !CLAUDE.md
-!.nb-suite/
-!.nb-suite/**
+!.nb/
+!.nb/**
 
 # Standard Python ignores
 __pycache__/

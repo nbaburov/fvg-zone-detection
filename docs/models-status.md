@@ -7,7 +7,7 @@ What is trained, what data it saw, what splits we have, how it performs, what's 
 
 ## Stack
 
-Python 3.12, CPU-only LSTM (MPS disabled — see `.nb-suite/research/12-May-26/mps-gpu-fix.md`), subprocess XGB workers. Data: 2016–2025 SPY H1. Label: ValidFVG.
+Python 3.12, CPU-only LSTM (MPS disabled — see `.nb/research/12-May-26/mps-gpu-fix.md`), subprocess XGB workers. Data: 2016–2025 SPY H1. Label: ValidFVG.
 
 ## Data splits (temporal, no shuffle)
 

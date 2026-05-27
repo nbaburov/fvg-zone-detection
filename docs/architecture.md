@@ -124,7 +124,7 @@ smc-data-challenge/
 │   └── inspect/<timestamp>/{summary.md, plots/}
 │
 ├── docs/                          # this directory
-├── .nb-suite/                     # research/plan/build logs
+├── .nb/                     # research/plan/build logs
 └── CLAUDE.md                      # project rules for AI assistance
 ```
 
@@ -312,5 +312,5 @@ sequenceDiagram
 | Trained weights | `checkpoints/<model>/<name>.{pt,ubj}` + matching `.meta.json` |
 | Inspector report | `reports/inspect/<timestamp>/summary.md` + `plots/*.html` |
 | Live session log | `logs/paper/<session-id>/{bars.parquet, events.jsonl, trades.sqlite}` |
-| Research / plans / build logs | `.nb-suite/{research,plan,build}/<date>/<topic>.md` |
+| Research / plans / build logs | `.nb/{research,plan,build}/<date>/<topic>.md` |
 | Docs | `docs/` (this directory) |

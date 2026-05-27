@@ -14,7 +14,7 @@ Exit codes:
 Usage:
     python scripts/data/count_valid_fvg.py
 
-Saves ablation CSV to .nb-suite/analysis/criterion-ablation-<date>.csv.
+Saves ablation CSV to .nb/analysis/criterion-ablation-<date>.csv.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 from src.data.labels.valid_fvg import ValidFVGLabeller  # noqa: E402
 
 PARQUET_PATH = ROOT / "data" / "processed" / "spy_h1.parquet"
-ANALYSIS_DIR = ROOT / ".nb-suite" / "analysis"
+ANALYSIS_DIR = ROOT / ".nb" / "analysis"
 
 # Decision-tree thresholds (from plan Risk 2)
 GATE_PROCEED = 150

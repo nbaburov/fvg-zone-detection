@@ -82,7 +82,7 @@ Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades 
 | [`docs/assignment.md`](docs/assignment.md) | Fontys assignment specification + deadlines |
 | [`docs/fvg-label-guide.md`](docs/fvg-label-guide.md) | Manual annotation guide for the gold set |
 | `CLAUDE.md` | Conventions for AI-assisted development (Claude Code rules) |
-| `.nb-suite/` | Research + plan + build logs (not docs but useful context) |
+| `.nb/` | Research + plan + build logs (not docs but useful context) |
 
 ## Project layout (short version)
 

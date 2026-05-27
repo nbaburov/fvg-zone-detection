@@ -13,7 +13,7 @@ Steps:
     6. Train with AdamW + OneCycleLR + EarlyStop on val macro-F1
     7. Load best checkpoint
     8. Evaluate on test set
-    9. Write .nb-suite/test-logs/11-May-26/lstm-baseline.md
+    9. Write .nb/test-logs/11-May-26/lstm-baseline.md
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
 def select_device(requested: str) -> torch.device:
     # MPS LSTM gradient kernel is broken in torch 2.11 — multi-layer backprop deadlocks.
     # CPU is the only reliable device for LSTM training on Apple Silicon.
-    # See .nb-suite/research/12-May-26/mps-gpu-fix.md
+    # See .nb/research/12-May-26/mps-gpu-fix.md
     if requested == "mps":
         print("WARNING: MPS requested but LSTM training is CPU-only. Using CPU.")
     return torch.device("cpu")
@@ -593,7 +593,7 @@ def main() -> None:
     print(f"Device: {device}")
 
     metadata = log_run_metadata(args.seed, device)
-    metadata["device"] = "cpu (forced — MPS LSTM bug, see .nb-suite/research/12-May-26/mps-gpu-fix.md)"
+    metadata["device"] = "cpu (forced — MPS LSTM bug, see .nb/research/12-May-26/mps-gpu-fix.md)"
     print(f"Metadata: {metadata}")
 
     # Data
@@ -634,7 +634,7 @@ def main() -> None:
     ckpt_path = out_dir / f"lstm_seed{args.seed}{label_tag}.pt"
     log_csv_path = Path("logs") / f"lstm_seed{args.seed}{label_tag}.csv"
     log_csv_path.parent.mkdir(parents=True, exist_ok=True)
-    eval_log_path = Path(".nb-suite/test-logs/11-May-26/lstm-baseline.md")
+    eval_log_path = Path(".nb/test-logs/11-May-26/lstm-baseline.md")
 
     max_epochs = 5 if args.debug else args.max_epochs
 

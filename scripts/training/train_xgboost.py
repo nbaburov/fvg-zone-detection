@@ -12,7 +12,7 @@ Steps:
     6. Train XGBoostFVGClassifier with early stopping on val mlogloss.
     7. Evaluate on val set, then test set.
     8. Save model + metadata.
-    9. Write evaluation log to .nb-suite/test-logs/11-May-26/xgboost-baseline.md.
+    9. Write evaluation log to .nb/test-logs/11-May-26/xgboost-baseline.md.
 """
 
 from __future__ import annotations
@@ -365,7 +365,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 11. Write evaluation log
     # ------------------------------------------------------------------
-    log_dir = REPO / ".nb-suite" / "test-logs" / "11-May-26"
+    log_dir = REPO / ".nb" / "test-logs" / "11-May-26"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "xgboost-baseline.md"
 
