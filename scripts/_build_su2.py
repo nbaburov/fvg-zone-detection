@@ -378,7 +378,7 @@ single time would score 97% and be useless. That always-say-none strategy is my 
 scores only **0.328 macro-F1**, the floor every useful model must clear (it is the dotted line in the later
 figures). So the headline metric is **macro-F1**, which averages how well each class is found and gives the
 rare bull and bear zones equal weight. I also weight the rare classes more heavily during training
-(inverse-frequency class weights) so the model cannot just ignore them."""))
+(inverse-frequency class weights: a rare bull or bear example counts far more toward the training loss than a common "none"), so the model cannot just ignore them."""))
 
     c.append(md("""## 3a. What makes a gap "valid", and do the labels hold up?
 
@@ -402,7 +402,7 @@ instead of as a hard yes/no.
 To trust those automatic labels, I hand-annotated 75 candles myself and compared (Figure 4b)."""))
     c.append(code(FIG_GOLD))
     c.append(md("""**What I found.** On all 75 hand-checked candles my labels and the rule agreed exactly: Cohen's kappa,
-a standard agreement score where 1.0 is perfect, came out at **1.0**. The sample is small, so I read this as
+a standard agreement score that corrects for chance (so it is stricter than a raw match rate), where 1.0 is perfect, came out at **1.0**. The sample is small, so I read this as
 "no disagreements found in 75 checks", not "proven perfect forever". It is enough to treat the automatic
 labels as trustworthy ground truth for training."""))
 
@@ -436,7 +436,7 @@ Several paths did not make the cut, each rejected for a reason:
 - **An off-the-shelf SMC library**, rejected: its FVG detection peeked one bar into the future (look-ahead
   leakage). I wrote a clean, leakage-free detector instead.
 - **Yahoo/yfinance data**, rejected: hourly history capped at about 730 days, and I need years.
-- **Focal loss** (a fancier imbalance remedy), tried, did not beat plain class-weighted training here.
+- **Focal loss**, which down-weights easy examples during training so the model concentrates on the hard, rare gaps, tried, did not beat plain class-weighted training here.
 - **Decision-threshold tuning**, tried, gains did not survive across seeds, so I dropped it to avoid
   over-fitting the validation set."""))
 
@@ -483,8 +483,7 @@ designed up front:
    Fixing the rule first is what stops me from rationalising whatever I happen to see.
 
 A note on **confidence intervals**, since they appear throughout. Each model is trained five times with
-different random starts, and I resample those results a thousand times to get a range rather than a single
-lucky number (a block bootstrap, which respects the overlap between neighbouring windows; Efron & Tibshirani, 1993). When two models' ranges overlap, I call it a tie rather than inventing a winner."""))
+different random starts, and I draw from those results a thousand times at random with replacement, to simulate many more experiments and read off the spread (a block bootstrap, which keeps neighbouring near-identical windows together rather than splitting them; Efron & Tibshirani, 1993). When two models' ranges overlap, I call it a tie rather than inventing a winner."""))
 
     # Part 5
     c.append(md("""# Part 5 · What I did: five models, each on its own terms
@@ -494,12 +493,12 @@ confidence intervals. Each model below gets a fair hearing: what it is, why it e
 taught me, including the ones that lost."""))
 
     c.append(md("""### XGBoost, the classical control (reference)
-A gradient-boosted tree ensemble on the 35 engineered features. **Role:** the sanity check. In a small-data
+A gradient-boosted tree ensemble (it builds many small decision trees one after another, each correcting the previous trees' mistakes) on the 35 engineered features. **Role:** the sanity check. In a small-data
 problem like this, a well-fed classical model is often very hard to beat, and it is, at **0.721**. But it
 reads the easier input, so I treat it as a reference line, not the deep-learning winner.
 
 ### LSTM, the recurrent baseline
-Reads the 60 hours in order, one step at a time. **0.595 ± 0.015.** It memorises the training data well
+Reads the 60 hours in order, one step at a time, carrying a running summary (its hidden state) of everything seen so far. **0.595 ± 0.015.** It memorises the training data well
 (train-F1 near 0.96) but generalises to only about 0.60, a large gap. That gap is a fingerprint, and I
 return to it.
 
@@ -509,13 +508,13 @@ shapes. An FVG *is* a local shape, so this built-in bias fits the problem: **0.6
 the top deep model, with the best rare-class scores (bull 0.50, bear 0.44) and the tightest spread.
 
 ### Transformer, the flexible heavyweight
-Self-attention (Vaswani et al., 2017), almost no built-in assumptions, the architecture behind modern AI at scale. **0.548 ± 0.085.**
+Self-attention (Vaswani et al., 2017), which lets every hour look at every other hour at once instead of reading step by step, with almost no built-in assumptions, the architecture behind modern AI at scale. **0.548 ± 0.085.**
 The headline here is the **±0.085**, six times the spread of the recurrent models. On four of five runs it
 reaches about 0.58 to 0.61; on others it *collapses* to predicting "none" only. On this little data it is
 unreliable rather than weak: when it trains it competes, but I cannot count on it doing so.
 
 ### xLSTM, the newest design, and an informative negative
-A 2024 "extended LSTM" (Beck et al., 2024), on paper the most sophisticated sequence model here. In practice **0.369 ± 0.007**,
+A 2024 "extended LSTM" (Beck et al., 2024) that replaces the LSTM's single memory value with a matrix and uses exponential gating, in theory more expressive, on paper the most sophisticated sequence model here. In practice **0.369 ± 0.007**,
 barely above the always-guess-"none" floor, and it **cannot even fit the training data** (train-F1 near
 0.34). This is the most useful of the failures: a more complex model scoring *worse* is direct evidence
 that complexity is not what the task lacks."""))
@@ -557,15 +556,15 @@ them G1 to G10) so the comparison is fair and the conclusions are not artefacts 
 
 | Gate | What it does | Why it matters here |
 |---|---|---|
-| **G1** | Hyper-parameter tuning (Optuna search) | every model competes at its own *best* settings, not a guess |
+| **G1** | Hyper-parameter tuning (an Optuna search that tries many setting combinations and uses past results to choose the next) | every model competes at its own *best* settings, not a guess |
 | **G2** | 5-seed variance | reports a range, not one lucky run |
-| **G3** | Focal-loss ablation | tested a fancier imbalance remedy; it did not beat class weighting |
-| **G4** | Decision-threshold tuning | checked if moving the cut-off helps; gains did not survive across seeds |
+| **G3** | Focal-loss ablation | focal loss dynamically down-weights easy examples; it did not beat plain class weighting here |
+| **G4** | Decision-threshold tuning | checked if raising the confidence cut-off before calling a gap helps; gains did not survive across seeds |
 | **G5** | SHAP feature importance | Figure 6b; confirms XGBoost relies on momentum and gap geometry |
 | **G6** | Bull vs bear asymmetry | confirms bear gaps are the harder class for every model |
 | **G7** | Window-size sweep | checked 30 to 120 hours; 60 gave the best validation F1 for its cost, so I use it |
 | **G8** | Data-scaling check | more years of data helps, which foreshadows the data-bound verdict |
-| **G9** | Regularisation ablation | dropout and weight-decay actually help the recurrent models |
+| **G9** | Regularisation ablation | dropout (randomly switching off connections in training) and weight-decay (penalising large weights) help the recurrent models |
 | **G10** | Bootstrap confidence intervals | the error bars behind every "tie" claim in this notebook |
 
 The key one for this update is **G1**: because each model is individually tuned, "CNN-LSTM beats Transformer"
@@ -627,9 +626,10 @@ The question above was the spine, but a few other things are worth recording.
   every model five times and report the spread. CNN-LSTM (0.639) and LSTM (0.595) overlap once that spread is
   accounted for, which is why I call them a tie rather than declaring a winner the next run might overturn.
 - **Giving the Transformer a fair second chance.** The Transformer did badly partly because it was untuned.
-  So I am running a properly-tuned, stabilised version of it (a learning-rate warm-up that eases the rate up
-  at the start, gradient clipping, plus a search over
-  its settings). This answers the obvious objection ("maybe a bigger model just needed tuning") with an
+  So I am running a properly-tuned, stabilised version. Two stabilisers target the collapse: a learning-rate
+  warm-up eases the rate up at the start, and gradient clipping caps how large a single update can be, so one
+  bad batch cannot blow up the weights the way it did on the failed runs. A hyper-parameter search then finds
+  good settings. This answers the obvious objection ("maybe a bigger model just needed tuning") with an
   experiment instead of an assumption. Based on everything above I expect it to reach parity at best, and I
   will report whatever it actually does."""))
 
@@ -742,7 +742,7 @@ largest models did *worse*, so the task is **data-bound, not capacity-bound**. T
   controlled cross-test (XGBoost on the raw window, or a deep net on the 35 features), so I cannot fully
   attribute the gap to architecture rather than representation. That cross-test is the clean way to settle it.
 - **The confidence scores are not yet calibration-checked.** The product value is a calibrated probability,
-  but the scores currently come straight from the network's softmax; I have not verified with a reliability
+  but the scores currently come straight from the network's softmax. Softmax turns the raw outputs into probabilities that add to one, which does not by itself make them accurate, and I have not verified with a reliability
   diagram that "80% sure" is right about 80% of the time. Calibration assessment is future work.
 - **Learning curves are noisy** over three seeds ("no plateau", not a precise slope).
 - **Transformer and xLSTM are untuned baselines**; the Transformer collapses on some runs (true collapse rate
