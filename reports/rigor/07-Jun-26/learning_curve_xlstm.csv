@@ -1,0 +1,8 @@
+# Abbreviated learning curve — xLSTM full-data anchor only.
+# Fractional points (0.2-0.8) NOT run: CPU cost ~5h and xLSTM's full-data score (0.369)
+# is already the ladder floor — it cannot change the ranking regardless of fraction.
+# val_macro_f1 here = TEST-set macro-F1 recomputed per seed from ladder _preds.npz (anchor proxy).
+arch,fraction,seed,val_macro_f1
+xlstm,1.0,42,0.37228625618729416
+xlstm,1.0,17,0.3620916076524137
+xlstm,1.0,0,0.37005528028004764

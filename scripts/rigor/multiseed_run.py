@@ -40,7 +40,8 @@ def _is_yaml_path(path: Path) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-seed training sweep")
-    parser.add_argument("--model", required=True, choices=["lstm", "xgboost", "cnn_lstm"])
+    parser.add_argument("--model", required=True,
+                        choices=["lstm", "xgboost", "cnn_lstm", "transformer", "xlstm"])
     parser.add_argument("--config", required=True, type=Path,
                         help="Path to experiments/foo.yaml or legacy best_<model>_config.json")
     parser.add_argument("--set", dest="set_overrides", nargs="+", default=[],

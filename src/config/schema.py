@@ -52,8 +52,29 @@ class CNNLSTMModelConfig(BaseModel):
     head_dropout: float = 0.526
 
 
+class TransformerModelConfig(BaseModel):
+    arch: Literal["transformer"] = "transformer"
+    d_model: int = 64
+    nhead: int = 4
+    num_layers: int = 2
+    dim_feedforward: int = 128
+    dropout: float = 0.1
+    head_dropout: float = 0.3
+    pool: Literal["mean", "cls"] = "mean"
+
+
+class XLSTMModelConfig(BaseModel):
+    arch: Literal["xlstm"] = "xlstm"
+    embedding_dim: int = 64
+    num_blocks: int = 2
+    num_heads: int = 4          # sLSTM heads per block (stack is sLSTM-only: slstm_at="all")
+    dropout: float = 0.1
+    head_dropout: float = 0.3
+
+
 ModelConfig = Annotated[
-    LSTMModelConfig | XGBModelConfig | CNNLSTMModelConfig,
+    LSTMModelConfig | XGBModelConfig | CNNLSTMModelConfig
+    | TransformerModelConfig | XLSTMModelConfig,
     Field(discriminator="arch"),
 ]
 

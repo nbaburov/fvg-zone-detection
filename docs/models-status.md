@@ -5,6 +5,22 @@ What is trained, what data it saw, what splits we have, how it performs, what's 
 > **Current label target (training):** `ValidFVGLabeller` ("fvg_valid") — 6-criteria SMC FVG @ N+2.
 > Raw `FVGLabeller` ("fvg") results are preserved in the Dual-FVG Baselines section. Not a regression — different problem.
 
+## DL Ladder — Complete (5 architectures, ValidFVG, 5 seeds, 2016–2025)
+
+Updated 07-Jun-26. Diagnosis gate: `reports/rigor/07-Jun-26/dl_diagnosis_decision.md`. Bootstrap CIs: `reports/rigor/07-Jun-26/bootstrap/` (1000 iter, block=60, effective_n=86).
+
+| Rank | Model | Input | Mean Macro F1 | Std | 95% bootstrap CI | Status |
+|------|-------|-------|--------------|-----|------------------|--------|
+| ref | XGBoost (G1 HP) | 35 engineered feats | 0.721 | 0.001 | [0.671, 0.761] | Reference — input mismatch, not pure-arch |
+| 1 | **CNN-LSTM** (G1 HP) | raw (60,5) | **0.639** | 0.013 | [0.603, 0.674] | **Complete — carrier** |
+| 2 | LSTM (G1 HP) | raw (60,5) | 0.595 | 0.015 | [0.560, 0.628] | Complete |
+| 3 | Transformer (untuned) | raw (60,5) | 0.548 | 0.095 | [0.519, 0.572] | Complete — seed42 collapse |
+| 4 | xLSTM (untuned) | raw (60,5) | 0.369 | 0.007 | [0.354, 0.384] | Complete — ladder floor |
+
+**Current best (DL, fair raw-window input):** CNN-LSTM, 0.639 ± 0.013. XGB (0.721) leads overall but on engineered-feature input — not a pure-architecture comparison.
+
+**Progression:** XGBoost → LSTM → **CNN-LSTM (carrier)** → Transformer → xLSTM. Ladder is now COMPLETE (5 archs). Diagnosis: the recurrent models (LSTM/CNN-LSTM) are **data + regularisation-bound** (fit train at 0.83–0.95, learning curves show **no plateau** through full data — non-monotonic over 3 seeds, so "no plateau" not a precise slope) → lever = multi-symbol data. The two larger archs did *worse*, for different reasons: **xLSTM underfits** (train F1 0.33–0.40, cannot fit train), **Transformer fits + generalises on 4/5 seeds (val 0.58–0.61) but is high-variance** (seed42 collapse, std 0.095). Neither beats CNN-LSTM → **task is not capacity-bound**. Multi-symbol is the lever for the recurrent models, NOT the larger archs (xLSTM must fit first; Transformer must be stabilised). Transformer/xLSTM are untuned baselines (no Optuna).
+
 ## Stack
 
 Python 3.12, CPU-only LSTM (MPS disabled — see `.nb/research/12-May-26/mps-gpu-fix.md`), subprocess XGB workers. Data: 2016–2025 SPY H1. Label: ValidFVG.
@@ -445,14 +461,14 @@ LSTM and XGB Plotly timelines + top-20 disagreement window charts generated 2026
 
 ## Model progression
 
-XGBoost baseline → LSTM → **CNN-LSTM** → xLSTM → Transformer.
+XGBoost baseline → LSTM → **CNN-LSTM (carrier)** → Transformer → xLSTM. **LADDER COMPLETE (5 archs, 07-Jun-26)** — see the "DL Ladder — Complete" section above and `reports/rigor/07-Jun-26/dl_diagnosis_decision.md` for the fresh 5-seed numbers + bootstrap CIs + per-model cards.
 
-| Model | Mean Macro F1 | Status |
+| Model | Mean Macro F1 (07-Jun-26) | Status |
 |-------|--------------|--------|
-| XGBoost | 0.721 | Complete (G1–G10 rigor) |
-| CNN-LSTM | 0.614 | Complete (G1–G10 rigor) |
-| LSTM | 0.599 | Complete (G1–G10 rigor) |
-| xLSTM | — | Not started |
-| Transformer | — | Not started |
+| XGBoost | 0.721 ± 0.001 | Complete (reference — engineered feats, input mismatch) |
+| CNN-LSTM | 0.639 ± 0.013 | Complete — **carrier** |
+| LSTM | 0.595 ± 0.015 | Complete |
+| Transformer | 0.548 ± 0.095 | Complete (untuned, seed42 collapse) |
+| xLSTM | 0.369 ± 0.007 | Complete (untuned) |
 
-Current best: XGB (0.721). CNN-LSTM beats LSTM by +0.015.
+Current best DL on fair raw-window input: **CNN-LSTM (0.639)**. XGB (0.721) leads overall but on engineered features (not a pure-architecture comparison). The earlier 0.614 CNN-LSTM figure was a prior run; the 0.639 here is the fresh uniform 5-seed ladder.

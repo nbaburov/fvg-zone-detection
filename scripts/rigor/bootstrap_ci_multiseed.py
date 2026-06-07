@@ -30,7 +30,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-seed block bootstrap CI")
     parser.add_argument("--pred-dir", required=True, type=Path,
                         help="Directory containing <model>_seed*_preds.npz files")
-    parser.add_argument("--model", required=True, choices=["lstm", "xgb", "xgboost", "cnn_lstm"],
+    parser.add_argument("--model", required=True,
+                        choices=["lstm", "xgb", "xgboost", "cnn_lstm", "transformer", "xlstm"],
                         help="Model type prefix to glob for")
     parser.add_argument("--config", type=Path, default=None,
                         help="Path to experiments/foo.yaml (optional — sets block_size, n_iter)")

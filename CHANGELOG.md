@@ -4,6 +4,31 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-07]
+
+DL ladder completed (5 archs) + data-vs-capacity diagnosis. CNN-LSTM confirmed carrier; task is data-bound.
+
+### Added
+- **Transformer** (`src/models/transformer.py`, `FVGTransformerClassifier` — encoder + mean/CLS pool) and **xLSTM** (`src/models/xlstm_model.py`, `FVGxLSTMClassifier` — sLSTM stack, `xlstm==2.0.5` v2 API, vanilla backend for Apple Silicon). Both wired into schema/registry/dispatcher; configs `experiments/{transformer,xlstm}_g1.yaml`. Untuned baselines.
+- **Learning-curve harness** `scripts/rigor/learning_curve.py` (val F1 vs train fraction, any arch) with an A2b guard asserting `--train-fraction` is honoured (window count scales with fraction).
+- **`--train-fraction`** flag + per-epoch **train macro-F1 logging** in `scripts/training/train.py` (shared loop → all 4 torch archs), enabling the data-bound/capacity-bound diagnosis.
+- `scripts/rigor/run_dl_diagnosis_pipeline.sh` — orchestrates the full ladder + learning curves (CPU, background-safe).
+- Diagnosis gate report `reports/rigor/07-Jun-26/dl_diagnosis_decision.md` (per-model cards, bootstrap CIs, decision matrix) + bootstrap CI artifacts.
+- Tests: `tests/models/test_{transformer,xlstm_model}.py`, `tests/config/test_schema_roundtrip.py`, `tests/rigor/test_{seed_sweep_routing,train_fraction}.py`. Suite 284 → **353**.
+
+### Fixed
+- **Segfault (macOS arm64):** `src/rigor/seed_sweep.py` routed transformer/xlstm through the `else` branch into in-process XGBoost, which segfaults after a torch import. Added `_train_torch_generic` (registry-built, CPU-forced); unknown arch now raises instead of misrouting. Regression-tested.
+- `seed_sweep.py` `_get_device()` could return MPS (broken gradient kernel) — forced CPU.
+- `seed_sweep.py` cache loader silently zeroed minority-class F1 for `train.py`-format metas (`test_bull_f1`/`test_bear_f1` vs `test_per_class_f1` array) — now reads both.
+- `bootstrap_ci_multiseed.py` / `multiseed_run.py` — added `transformer`/`xlstm` to `--model` choices.
+
+### Results (ValidFVG, 5 seeds, raw (60,5), 95% bootstrap CI)
+- CNN-LSTM **0.639 ± 0.013** [0.603, 0.674] — carrier · LSTM 0.595 ± 0.015 · Transformer 0.548 ± 0.095 (unstable, seed42 collapse) · xLSTM 0.369 ± 0.007 (underfits). XGB 0.721 reference (engineered feats, input mismatch).
+- **Diagnosis:** task is **data-bound, not capacity-bound** — bigger archs did worse; recurrent learning curves show no plateau. Lever = multi-symbol data. Full rationale + caveats in the decision report.
+
+### Notes
+- All experiment YAMLs CPU-only (MPS bug). xLSTM learning curve abbreviated to full-data anchor (CPU cost; full-data score already its ceiling). CNN-LSTM/LSTM ladder checkpoints overwritten by learning-curve runs — canonical results live in `reports/`.
+
 ## [2026-05-13]
 
 CNN-LSTM baseline + config-system refactor.

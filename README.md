@@ -89,7 +89,7 @@ Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades 
 ```
 src/data/      acquisition, labelling, splitting, windowing
 src/features/  feature engineering for non-DL models
-src/models/    architectures (LSTM, CNN-LSTM, XGBoost)
+src/models/    architectures (LSTM, CNN-LSTM, Transformer, xLSTM, XGBoost)
 src/training/  loss, early stop, train utils
 src/inspect/   offline model inspection toolkit
 src/live/      live paper-trading harness

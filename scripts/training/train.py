@@ -7,8 +7,11 @@ Usage:
     python scripts/training/train.py --config experiments/lstm_g1.yaml --seed 17
 
 Dispatches:
-    arch=lstm  -> _train_lstm(cfg, seed)
-    arch=xgb   -> _train_xgb(cfg, seed)
+    arch=lstm        -> _train_lstm(cfg, seed)
+    arch=xgb         -> _train_xgb(cfg, seed)
+    arch=cnn_lstm    -> _train_cnn_lstm(cfg, seed)
+    arch=transformer -> _train_transformer(cfg, seed)
+    arch=xlstm       -> _train_xlstm(cfg, seed)
 """
 
 from __future__ import annotations
@@ -22,7 +25,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.config import ExperimentConfig, load_experiment
-from src.config.schema import CNNLSTMModelConfig, LSTMModelConfig, XGBModelConfig
+from src.config.schema import (
+    CNNLSTMModelConfig,
+    LSTMModelConfig,
+    TransformerModelConfig,
+    XGBModelConfig,
+    XLSTMModelConfig,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,14 +87,41 @@ def parse_args(default_config: str | None = None) -> argparse.Namespace:
         action="store_true",
         help="Overfit check: tiny data subset, 5 epochs max.",
     )
+    p.add_argument(
+        "--train-fraction",
+        type=float,
+        default=1.0,
+        dest="train_fraction",
+        help="Fraction of the train split to use (contiguous, earliest-first head slice, "
+             "NEVER random). Default 1.0 is an exact no-op. Applied BEFORE windowing.",
+    )
     return p.parse_args()
+
+
+def _head_slice_train(train_df, train_fraction: float):
+    """Contiguous earliest-first head slice of the train DataFrame.
+
+    train_fraction=1.0 returns train_df unchanged (exact no-op). Never shuffles —
+    temporal order is preserved (rows [0 : ceil(N * fraction)]).
+    """
+    if train_fraction == 1.0:
+        return train_df
+    if not 0.0 < train_fraction <= 1.0:
+        raise ValueError(f"--train-fraction must be in (0, 1], got {train_fraction}")
+    import math
+    n = int(math.ceil(len(train_df) * train_fraction))
+    sliced = train_df.iloc[:n]
+    print(f"[train-fraction={train_fraction}] head slice: {len(sliced)}/{len(train_df)} rows "
+          f"(earliest-first, contiguous)")
+    return sliced
 
 
 # ---------------------------------------------------------------------------
 # LSTM dispatch
 # ---------------------------------------------------------------------------
 
-def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
+def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
+                train_fraction: float = 1.0) -> None:
     """Train LSTM with config-driven HP. Uses Adam optimiser to match G1 Optuna search."""
     import random
 
@@ -142,6 +178,9 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
         train_df = train_df.iloc[:260]
         val_df   = val_df.iloc[:130]
         print(f"[DEBUG] Subset: train={len(train_df)} rows, val={len(val_df)} rows")
+
+    # A2a: contiguous earliest-first head slice BEFORE windowing (no-op at 1.0).
+    train_df = _head_slice_train(train_df, train_fraction)
 
     w = cfg.data.window_size
     _drop_cs = cfg.data.drop_cross_session
@@ -277,6 +316,8 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
                              if len(test_metrics["per_class_f1"]) > 2 else 0.0),
             "nan_detected": nan_detected,
             "n_params": n_params,
+            "n_train_windows": len(train_ds),
+            "train_fraction": train_fraction,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -296,7 +337,13 @@ def _lstm_train_loop(
     max_grad_norm: float,
     window_size: int,
 ) -> tuple[list[dict], int, float]:
-    """Core LSTM training loop. Config-driven. Identical logic to train_lstm.train()."""
+    """Core torch training loop. Config-driven. Shared by LSTM, CNN-LSTM, Transformer, xLSTM.
+
+    Logs a per-epoch train_macro_f1 column (computed via a no-dropout/no-grad
+    eval pass over the train loader) alongside the validation metrics. This is
+    the train/val generalisation gap diagnostic — it benefits every torch arch
+    routed through this loop.
+    """
     import numpy as np
     import torch
     from src.training.train_utils import eval_epoch
@@ -306,7 +353,7 @@ def _lstm_train_loop(
     best_smoothed_f1 = 0.0
 
     with open(log_path, "w") as f:
-        f.write("epoch,train_loss,val_loss,val_macro_f1,smoothed_val_macro_f1,"
+        f.write("epoch,train_loss,train_macro_f1,val_loss,val_macro_f1,smoothed_val_macro_f1,"
                 "val_bull_f1,val_bear_f1,lr\n")
 
     for epoch in range(1, max_epochs + 1):
@@ -343,6 +390,10 @@ def _lstm_train_loop(
             break
 
         train_loss = float(np.mean(train_losses))
+        # Train-eval pass: macro-F1 on the train set with no dropout / no grad.
+        # F1 is order-independent so the shuffled train_loader is fine here.
+        tm = eval_epoch(model, train_loader, criterion, device)
+        train_macro_f1 = tm["macro_f1"]
         vm = eval_epoch(model, val_loader, criterion, device)
         val_macro_f1 = vm["macro_f1"]
         vpc = vm["per_class_f1"]
@@ -362,6 +413,7 @@ def _lstm_train_loop(
         row = {
             "epoch": epoch,
             "train_loss": train_loss,
+            "train_macro_f1": train_macro_f1,
             "val_loss": vm["loss"],
             "val_macro_f1": val_macro_f1,
             "smoothed_val_macro_f1": smoothed,
@@ -372,10 +424,12 @@ def _lstm_train_loop(
         epoch_logs.append(row)
 
         with open(log_path, "a") as f:
-            f.write(f"{epoch},{train_loss:.6f},{vm['loss']:.6f},{val_macro_f1:.6f},"
-                    f"{smoothed:.6f},{val_bull_f1:.6f},{val_bear_f1:.6f},{current_lr:.8f}\n")
+            f.write(f"{epoch},{train_loss:.6f},{train_macro_f1:.6f},{vm['loss']:.6f},"
+                    f"{val_macro_f1:.6f},{smoothed:.6f},{val_bull_f1:.6f},"
+                    f"{val_bear_f1:.6f},{current_lr:.8f}\n")
 
         print(f"Epoch {epoch:3d} | train_loss={train_loss:.4f} | "
+              f"train_f1={train_macro_f1:.4f} | "
               f"val_macro_f1={val_macro_f1:.4f} | smoothed={smoothed:.4f} | "
               f"bull={val_bull_f1:.4f} | bear={val_bear_f1:.4f}")
 
@@ -392,7 +446,8 @@ def _lstm_train_loop(
 # CNN-LSTM dispatch
 # ---------------------------------------------------------------------------
 
-def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
+def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
+                    train_fraction: float = 1.0) -> None:
     """Train CNN-LSTM with config-driven HP. CPU only — same MPS constraint as LSTM."""
     import random
 
@@ -449,6 +504,9 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> No
         train_df = train_df.iloc[:260]
         val_df   = val_df.iloc[:130]
         print(f"[DEBUG] Subset: train={len(train_df)} rows, val={len(val_df)} rows")
+
+    # A2a: contiguous earliest-first head slice BEFORE windowing (no-op at 1.0).
+    train_df = _head_slice_train(train_df, train_fraction)
 
     w = cfg.data.window_size
     _drop_cs = cfg.data.drop_cross_session
@@ -596,6 +654,443 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False) -> No
             "use_pool": m.use_pool,
             "lstm_hidden": m.lstm_hidden,
             "lstm_layers": m.lstm_layers,
+            "n_train_windows": len(train_ds),
+            "train_fraction": train_fraction,
+        }, f, indent=2)
+    print(f"Metadata saved: {meta_path}")
+
+
+# ---------------------------------------------------------------------------
+# Transformer dispatch
+# ---------------------------------------------------------------------------
+
+def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
+                       train_fraction: float = 1.0) -> None:
+    """Train Transformer encoder with config-driven HP. CPU only — same MPS constraint.
+
+    Reuses the shared torch training loop (_lstm_train_loop): same loss, optimiser,
+    early-stop, and metadata sidecar as LSTM. Only model construction differs.
+    """
+    import random
+
+    import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
+
+    from src.config.registry import LOSSES, MODELS
+    from src.data.labels import LABELLERS
+    from src.data.window import SMCWindowDataset
+    from src.training.early_stop import EarlyStop
+    from src.training.train_utils import eval_epoch, log_run_metadata, set_seed
+
+    assert isinstance(cfg.model, TransformerModelConfig), \
+        f"Expected TransformerModelConfig, got {type(cfg.model)}"
+
+    set_seed(seed)
+    device = torch.device("cpu")  # MPS gradient kernel broken on Apple Silicon — CPU only
+    print(f"Device: {device} (forced — MPS bug, see CLAUDE.md)")
+
+    metadata = log_run_metadata(seed, device)
+    metadata["device"] = "cpu (forced — MPS bug)"
+    metadata["config"] = cfg.name
+
+    # --- Data ---
+    label_key = cfg.data.labeller
+    labeller = LABELLERS[label_key]()
+
+    data_dir = Path(cfg.data.data_dir)
+    splits = cfg.data.splits
+
+    if splits == "legacy":
+        from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
+        import pandas as pd
+        labeled_df = pd.read_parquet(data_dir / "spy_h1_labeled.parquet")
+        tmp = LABELLERS[label_key]()
+        labeled_df = labeled_df.copy()
+        labeled_df["label"] = tmp.label(labeled_df).map(tmp.encoded_map).astype(int)
+        train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
+    elif splits == "default":
+        import pandas as pd
+        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+    else:
+        import pandas as pd
+        splits_dir = Path(splits)
+        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        print(f"  Using custom splits dir: {splits_dir}")
+
+    if debug:
+        train_df = train_df.iloc[:260]
+        val_df   = val_df.iloc[:130]
+        print(f"[DEBUG] Subset: train={len(train_df)} rows, val={len(val_df)} rows")
+
+    # A2a: contiguous earliest-first head slice BEFORE windowing (no-op at 1.0).
+    train_df = _head_slice_train(train_df, train_fraction)
+
+    w = cfg.data.window_size
+    _drop_cs = cfg.data.drop_cross_session
+    train_ds = SMCWindowDataset(train_df, labeller, stride=cfg.data.stride, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    val_ds   = SMCWindowDataset(val_df,   labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    test_ds  = SMCWindowDataset(test_df,  labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    print(f"Windows — train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}")
+
+    def seed_worker(worker_id: int) -> None:
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    g = torch.Generator()
+    g.manual_seed(seed)
+    train_loader = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True,
+                              num_workers=0, worker_init_fn=seed_worker, generator=g)
+    val_loader   = DataLoader(val_ds,   batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+    test_loader  = DataLoader(test_ds,  batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+
+    # --- Class weights ---
+    cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    with open(cw_dir / cw_file) as f:
+        cw = json.load(f)
+    class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
+    print(f"Class weights: {class_weights}")
+
+    # --- Model ---
+    m = cfg.model
+    dropout   = 0.0 if cfg.train.ablation_no_dropout else m.dropout
+    head_drop = 0.0 if cfg.train.ablation_no_dropout else m.head_dropout
+
+    model = MODELS["transformer"](
+        d_model=m.d_model,
+        nhead=m.nhead,
+        num_layers=m.num_layers,
+        dim_feedforward=m.dim_feedforward,
+        dropout=dropout,
+        head_dropout=head_drop,
+        pool=m.pool,
+    ).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {n_params:,}")
+
+    # --- Loss ---
+    loss_cls = LOSSES[cfg.train.loss]
+    criterion = loss_cls(class_weights, gamma=cfg.train.focal_gamma) \
+        if cfg.train.loss == "focal" else loss_cls(class_weights)
+
+    # --- Optimiser ---
+    wd = 0.0 if cfg.train.ablation_no_l2 else cfg.train.weight_decay
+    if cfg.train.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+
+    # --- Scheduler ---
+    max_epochs = 5 if debug else cfg.train.max_epochs
+    if cfg.train.scheduler == "onecycle":
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=cfg.train.lr,
+            total_steps=max_epochs * len(train_loader),
+        )
+    else:
+        scheduler = None
+
+    # --- Checkpoint path: transformer_seed{N}{label_tag}.pt ---
+    label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "transformer"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = ckpt_dir / f"transformer_seed{seed}{label_tag}.pt"
+
+    early_stop = EarlyStop(
+        patience=cfg.train.patience,
+        min_delta=1e-4,
+        ema_alpha=cfg.train.ema_alpha,
+        mode="max",
+    )
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    log_csv = log_dir / f"transformer_seed{seed}{label_tag}.csv"
+
+    epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        device=device,
+        ckpt_path=ckpt_path,
+        max_epochs=max_epochs,
+        log_path=log_csv,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        early_stop=early_stop,
+        max_grad_norm=cfg.train.max_grad_norm,
+        window_size=w,
+    )
+
+    # Load best checkpoint
+    if ckpt_path.exists():
+        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+        print(f"Loaded best checkpoint: {ckpt_path}")
+
+    # Eval
+    val_metrics  = eval_epoch(model, val_loader,  criterion, device)
+    test_metrics = eval_epoch(model, test_loader, criterion, device)
+
+    from sklearn.metrics import classification_report
+    print("\n=== TEST RESULTS ===")
+    print(classification_report(
+        test_metrics["y_true"], test_metrics["y_pred"],
+        target_names=["none", "bull", "bear"], digits=4, zero_division=0,
+    ))
+    print(f"Test macro-F1: {test_metrics['macro_f1']:.4f}")
+
+    # Meta sidecar
+    nan_detected = any(np.isnan(r["val_macro_f1"]) for r in epoch_logs)
+    meta_path = ckpt_dir / f"transformer_seed{seed}{label_tag}.meta.json"
+    with open(meta_path, "w") as f:
+        json.dump({
+            **metadata,
+            "config": cfg.name,
+            "label": label_key,
+            "splits": splits,
+            "best_epoch": best_epoch,
+            "best_smoothed_val_macro_f1": best_f1,
+            "test_macro_f1": test_metrics["macro_f1"],
+            "test_bull_f1": (test_metrics["per_class_f1"][1]
+                             if len(test_metrics["per_class_f1"]) > 1 else 0.0),
+            "test_bear_f1": (test_metrics["per_class_f1"][2]
+                             if len(test_metrics["per_class_f1"]) > 2 else 0.0),
+            "nan_detected": nan_detected,
+            "n_params": n_params,
+            "arch": "transformer",
+            "d_model": m.d_model,
+            "nhead": m.nhead,
+            "num_layers": m.num_layers,
+            "dim_feedforward": m.dim_feedforward,
+            "pool": m.pool,
+            "n_train_windows": len(train_ds),
+            "train_fraction": train_fraction,
+        }, f, indent=2)
+    print(f"Metadata saved: {meta_path}")
+
+
+# ---------------------------------------------------------------------------
+# xLSTM dispatch
+# ---------------------------------------------------------------------------
+
+def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
+                 train_fraction: float = 1.0) -> None:
+    """Train xLSTM (sLSTM-only stack) with config-driven HP. CPU only — same MPS constraint.
+
+    Reuses the shared torch training loop (_lstm_train_loop): same loss, optimiser,
+    early-stop, and metadata sidecar as LSTM. Only model construction differs.
+    """
+    import random
+
+    import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
+
+    from src.config.registry import LOSSES, MODELS
+    from src.data.labels import LABELLERS
+    from src.data.window import SMCWindowDataset
+    from src.training.early_stop import EarlyStop
+    from src.training.train_utils import eval_epoch, log_run_metadata, set_seed
+
+    assert isinstance(cfg.model, XLSTMModelConfig), \
+        f"Expected XLSTMModelConfig, got {type(cfg.model)}"
+
+    set_seed(seed)
+    device = torch.device("cpu")  # MPS gradient kernel broken on Apple Silicon — CPU only
+    print(f"Device: {device} (forced — MPS bug, see CLAUDE.md)")
+
+    metadata = log_run_metadata(seed, device)
+    metadata["device"] = "cpu (forced — MPS bug)"
+    metadata["config"] = cfg.name
+
+    # --- Data ---
+    label_key = cfg.data.labeller
+    labeller = LABELLERS[label_key]()
+
+    data_dir = Path(cfg.data.data_dir)
+    splits = cfg.data.splits
+
+    if splits == "legacy":
+        from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
+        import pandas as pd
+        labeled_df = pd.read_parquet(data_dir / "spy_h1_labeled.parquet")
+        tmp = LABELLERS[label_key]()
+        labeled_df = labeled_df.copy()
+        labeled_df["label"] = tmp.label(labeled_df).map(tmp.encoded_map).astype(int)
+        train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
+    elif splits == "default":
+        import pandas as pd
+        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+    else:
+        import pandas as pd
+        splits_dir = Path(splits)
+        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        print(f"  Using custom splits dir: {splits_dir}")
+
+    if debug:
+        train_df = train_df.iloc[:260]
+        val_df   = val_df.iloc[:130]
+        print(f"[DEBUG] Subset: train={len(train_df)} rows, val={len(val_df)} rows")
+
+    # A2a: contiguous earliest-first head slice BEFORE windowing (no-op at 1.0).
+    train_df = _head_slice_train(train_df, train_fraction)
+
+    w = cfg.data.window_size
+    _drop_cs = cfg.data.drop_cross_session
+    train_ds = SMCWindowDataset(train_df, labeller, stride=cfg.data.stride, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    val_ds   = SMCWindowDataset(val_df,   labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    test_ds  = SMCWindowDataset(test_df,  labeller, stride=1, window_size=w,
+                                drop_cross_session_windows=_drop_cs)
+    print(f"Windows — train: {len(train_ds)}, val: {len(val_ds)}, test: {len(test_ds)}")
+
+    def seed_worker(worker_id: int) -> None:
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
+    g = torch.Generator()
+    g.manual_seed(seed)
+    train_loader = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True,
+                              num_workers=0, worker_init_fn=seed_worker, generator=g)
+    val_loader   = DataLoader(val_ds,   batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+    test_loader  = DataLoader(test_ds,  batch_size=cfg.train.batch_eval, shuffle=False, num_workers=0)
+
+    # --- Class weights ---
+    cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    with open(cw_dir / cw_file) as f:
+        cw = json.load(f)
+    class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
+    print(f"Class weights: {class_weights}")
+
+    # --- Model ---
+    m = cfg.model
+    dropout   = 0.0 if cfg.train.ablation_no_dropout else m.dropout
+    head_drop = 0.0 if cfg.train.ablation_no_dropout else m.head_dropout
+
+    model = MODELS["xlstm"](
+        embedding_dim=m.embedding_dim,
+        num_blocks=m.num_blocks,
+        num_heads=m.num_heads,
+        dropout=dropout,
+        head_dropout=head_drop,
+        context_length=w,
+    ).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"Model parameters: {n_params:,}")
+
+    # --- Loss ---
+    loss_cls = LOSSES[cfg.train.loss]
+    criterion = loss_cls(class_weights, gamma=cfg.train.focal_gamma) \
+        if cfg.train.loss == "focal" else loss_cls(class_weights)
+
+    # --- Optimiser ---
+    wd = 0.0 if cfg.train.ablation_no_l2 else cfg.train.weight_decay
+    if cfg.train.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+    else:
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr, weight_decay=wd)
+
+    # --- Scheduler ---
+    max_epochs = 5 if debug else cfg.train.max_epochs
+    if cfg.train.scheduler == "onecycle":
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=cfg.train.lr,
+            total_steps=max_epochs * len(train_loader),
+        )
+    else:
+        scheduler = None
+
+    # --- Checkpoint path: xlstm_seed{N}{label_tag}.pt ---
+    label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "xlstm"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = ckpt_dir / f"xlstm_seed{seed}{label_tag}.pt"
+
+    early_stop = EarlyStop(
+        patience=cfg.train.patience,
+        min_delta=1e-4,
+        ema_alpha=cfg.train.ema_alpha,
+        mode="max",
+    )
+
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    log_csv = log_dir / f"xlstm_seed{seed}{label_tag}.csv"
+
+    epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        criterion=criterion,
+        device=device,
+        ckpt_path=ckpt_path,
+        max_epochs=max_epochs,
+        log_path=log_csv,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        early_stop=early_stop,
+        max_grad_norm=cfg.train.max_grad_norm,
+        window_size=w,
+    )
+
+    # Load best checkpoint
+    if ckpt_path.exists():
+        model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+        print(f"Loaded best checkpoint: {ckpt_path}")
+
+    # Eval
+    val_metrics  = eval_epoch(model, val_loader,  criterion, device)
+    test_metrics = eval_epoch(model, test_loader, criterion, device)
+
+    from sklearn.metrics import classification_report
+    print("\n=== TEST RESULTS ===")
+    print(classification_report(
+        test_metrics["y_true"], test_metrics["y_pred"],
+        target_names=["none", "bull", "bear"], digits=4, zero_division=0,
+    ))
+    print(f"Test macro-F1: {test_metrics['macro_f1']:.4f}")
+
+    # Meta sidecar
+    nan_detected = any(np.isnan(r["val_macro_f1"]) for r in epoch_logs)
+    meta_path = ckpt_dir / f"xlstm_seed{seed}{label_tag}.meta.json"
+    with open(meta_path, "w") as f:
+        json.dump({
+            **metadata,
+            "config": cfg.name,
+            "label": label_key,
+            "splits": splits,
+            "best_epoch": best_epoch,
+            "best_smoothed_val_macro_f1": best_f1,
+            "test_macro_f1": test_metrics["macro_f1"],
+            "test_bull_f1": (test_metrics["per_class_f1"][1]
+                             if len(test_metrics["per_class_f1"]) > 1 else 0.0),
+            "test_bear_f1": (test_metrics["per_class_f1"][2]
+                             if len(test_metrics["per_class_f1"]) > 2 else 0.0),
+            "nan_detected": nan_detected,
+            "n_params": n_params,
+            "arch": "xlstm",
+            "embedding_dim": m.embedding_dim,
+            "num_blocks": m.num_blocks,
+            "num_heads": m.num_heads,
+            "n_train_windows": len(train_ds),
+            "train_fraction": train_fraction,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -652,11 +1147,15 @@ def main(default_config: str | None = None) -> None:
         print(f"Seed {seed}")
         print(f"{'='*60}")
         if cfg.model.arch == "lstm":
-            _train_lstm(cfg, seed, debug=args.debug)
+            _train_lstm(cfg, seed, debug=args.debug, train_fraction=args.train_fraction)
         elif cfg.model.arch == "xgb":
             _train_xgb(cfg, seed, debug=args.debug)
         elif cfg.model.arch == "cnn_lstm":
-            _train_cnn_lstm(cfg, seed, debug=args.debug)
+            _train_cnn_lstm(cfg, seed, debug=args.debug, train_fraction=args.train_fraction)
+        elif cfg.model.arch == "transformer":
+            _train_transformer(cfg, seed, debug=args.debug, train_fraction=args.train_fraction)
+        elif cfg.model.arch == "xlstm":
+            _train_xlstm(cfg, seed, debug=args.debug, train_fraction=args.train_fraction)
         else:
             raise ValueError(f"Unknown arch: {cfg.model.arch!r}")
 

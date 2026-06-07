@@ -24,7 +24,7 @@ from src.training.train_utils import set_seed, log_run_metadata
 
 @dataclass
 class SeedSweepConfig:
-    model_type: Literal["lstm", "xgb", "cnn_lstm"]
+    model_type: Literal["lstm", "xgb", "cnn_lstm", "transformer", "xlstm"]
     hyperparams: dict[str, Any]
     seeds: list[int]
     loss_type: Literal["weighted_ce", "focal"] = "weighted_ce"
@@ -62,6 +62,8 @@ class SeedSweepConfig:
         hp["batch_size"] = cfg.train.batch_size
         hp["lr"] = cfg.train.lr
         hp["weight_decay"] = cfg.train.weight_decay
+        hp["max_epochs"] = cfg.train.max_epochs
+        hp["patience"] = cfg.train.patience
 
         return cls(
             model_type=cfg.model.arch,
@@ -92,7 +94,7 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
         ckpt_dir = config.checkpoint_dir / config.model_type
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        if config.model_type in ("lstm", "cnn_lstm"):
+        if config.model_type in ("lstm", "cnn_lstm", "transformer", "xlstm"):
             ckpt_path = ckpt_dir / f"{ckpt_name}.pt"
             meta_path = ckpt_dir / f"{ckpt_name}.meta.json"
         else:
@@ -105,12 +107,23 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
                 meta = json.load(fh)
             if "test_macro_f1" in meta:
                 print(f"  Seed {seed}: checkpoint exists — loading cached results.")
+                # Two meta formats exist: seed_sweep writes a `test_per_class_f1`
+                # array; train.py writes `test_bull_f1`/`test_bear_f1` as separate
+                # keys. Handle both so cached train.py checkpoints don't silently
+                # zero the minority-class columns.
+                pcf = meta.get("test_per_class_f1")
+                if pcf is None:
+                    pcf = [
+                        meta.get("test_none_f1", 0.0),
+                        meta.get("test_bull_f1", 0.0),
+                        meta.get("test_bear_f1", 0.0),
+                    ]
                 rows.append({
                     "seed": seed,
                     "macro_f1": meta["test_macro_f1"],
-                    "none_f1": meta.get("test_per_class_f1", [0, 0, 0])[0],
-                    "bull_f1": meta.get("test_per_class_f1", [0, 0, 0])[1],
-                    "bear_f1": meta.get("test_per_class_f1", [0, 0, 0])[2],
+                    "none_f1": pcf[0],
+                    "bull_f1": pcf[1],
+                    "bear_f1": pcf[2],
                 })
                 continue
 
@@ -120,8 +133,16 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
             result = _train_lstm(config, seed, ckpt_path, meta_path)
         elif config.model_type == "cnn_lstm":
             result = _train_cnn_lstm(config, seed, ckpt_path, meta_path)
-        else:
+        elif config.model_type in ("transformer", "xlstm"):
+            result = _train_torch_generic(config, seed, ckpt_path, meta_path)
+        elif config.model_type in ("xgb", "xgboost"):
             result = _train_xgb(config, seed, ckpt_path, meta_path)
+        else:
+            raise ValueError(
+                f"Unknown model_type {config.model_type!r} in run_seed_sweep — "
+                "no training branch. (Previously this fell through to XGBoost, "
+                "which segfaults in-process on macOS arm64 after torch import.)"
+            )
 
         # Save predictions for bootstrap CI
         _save_predictions(config, seed, result)
@@ -375,6 +396,143 @@ def _train_cnn_lstm(
 
 
 # ---------------------------------------------------------------------------
+# Generic torch training (transformer, xlstm) — registry-built, CPU-only
+# ---------------------------------------------------------------------------
+
+# HP keys that are training-loop params, NOT model constructor args.
+_NON_MODEL_HP = {"batch_size", "lr", "weight_decay", "window_size", "max_epochs", "patience"}
+
+
+def _train_torch_generic(
+    config: SeedSweepConfig,
+    seed: int,
+    ckpt_path: Path,
+    meta_path: Path,
+) -> dict[str, Any]:
+    """Train any registry torch model for one seed. Used for transformer + xlstm.
+
+    Builds the model from src.config.registry.MODELS keyed by config.model_type,
+    passing every hyperparam except training-loop keys (_NON_MODEL_HP) to the ctor.
+    Mirrors the _train_cnn_lstm loop exactly: WeightedCE/Focal, Adam, early-stop(15),
+    100-epoch cap, best-val checkpoint, single final test eval. CPU only.
+    """
+    from src.config.registry import MODELS  # triggers model registrations
+    from src.data.labels import LABELLERS
+    from src.data.window import SMCWindowDataset
+    from src.training.early_stop import EarlyStop
+    from src.training.loss import FocalLoss, WeightedCE
+
+    arch = config.model_type
+    if arch not in MODELS:
+        raise KeyError(
+            f"Arch {arch!r} not in model registry {sorted(MODELS)} — "
+            "ensure it is decorated in src/config/_model_registrations.py"
+        )
+
+    set_seed(seed)
+    device = _get_device()  # CPU (forced)
+
+    train_df, val_df, test_df = _load_splits(config.data_dir)
+    labeller = LABELLERS["fvg_valid"]()
+
+    hp = config.hyperparams
+    window_size = int(hp.get("window_size", 60))
+    batch_size = int(hp.get("batch_size", 16))
+
+    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size,
+                                drop_cross_session_windows=False)
+    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size,
+                              drop_cross_session_windows=False)
+    test_ds = SMCWindowDataset(test_df, labeller, stride=1, window_size=window_size,
+                               drop_cross_session_windows=False)
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
+
+    weights = _load_class_weights(config.data_dir)
+    weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
+
+    # Model ctor args = all HP except training-loop keys. Apply dropout ablation.
+    model_kwargs = {k: v for k, v in hp.items() if k not in _NON_MODEL_HP}
+    if config.ablation_no_dropout:
+        for dk in ("dropout", "head_dropout"):
+            if dk in model_kwargs:
+                model_kwargs[dk] = 0.0
+    # xLSTM's sLSTM stack allocates internal state for context_length; it must
+    # track the actual window size, not the ctor default (60). Inject explicitly
+    # so a window_size sweep can't silently desync the stack from the data.
+    if arch == "xlstm":
+        model_kwargs["context_length"] = window_size
+    model = MODELS[arch](**model_kwargs).to(device)
+
+    if config.loss_type == "focal":
+        criterion = FocalLoss(class_weights=weights_tensor, gamma=config.focal_gamma)
+    else:
+        criterion = WeightedCE(weights_tensor)
+
+    lr = float(hp.get("lr", 1e-3))
+    weight_decay = 0.0 if config.ablation_no_l2 else float(hp.get("weight_decay", 1e-4))
+    optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    max_epochs = int(hp.get("max_epochs", 100))
+    patience = int(hp.get("patience", 15))
+    early_stop = EarlyStop(patience=patience, mode="max")
+
+    best_val_f1 = 0.0
+    best_state: dict | None = None
+    best_epoch = 0
+
+    for epoch in range(max_epochs):
+        model.train()
+        for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device)
+            y_batch = torch.as_tensor(y_batch, device=device)
+            optimiser.zero_grad()
+            logits = model(x_batch)
+            loss = criterion(logits, y_batch)
+            loss.backward()
+            optimiser.step()
+
+        val_f1, _, _ = _eval_f1_all(model, val_loader, device)
+
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_epoch = epoch
+
+        if early_stop.update(val_f1):
+            break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
+    test_macro_f1, test_per_class_f1, (y_true, y_pred) = _eval_f1_all(model, test_loader, device)
+    torch.save(model.state_dict(), ckpt_path)
+
+    meta = {
+        **log_run_metadata(seed, device),
+        "best_epoch": best_epoch,
+        "max_epochs": max_epochs,
+        "best_val_macro_f1": best_val_f1,
+        "test_macro_f1": test_macro_f1,
+        "test_per_class_f1": test_per_class_f1,
+        "hyperparams": config.hyperparams,
+        "loss_type": config.loss_type,
+        "focal_gamma": config.focal_gamma if config.loss_type == "focal" else None,
+        "arch": arch,
+    }
+    with meta_path.open("w") as fh:
+        json.dump(meta, fh, indent=2)
+
+    return {
+        "test_macro_f1": test_macro_f1,
+        "test_per_class_f1": test_per_class_f1,
+        "y_true": y_true,
+        "y_pred": y_pred,
+    }
+
+
+# ---------------------------------------------------------------------------
 # XGBoost training
 # ---------------------------------------------------------------------------
 
@@ -464,10 +622,8 @@ def _train_xgb(
 # ---------------------------------------------------------------------------
 
 def _get_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
+    # CPU-only: MPS gradient kernel is broken on Apple Silicon (torch 2.11) and
+    # CUDA is absent on this platform. All torch training runs on CPU per CLAUDE.md.
     return torch.device("cpu")
 
 
@@ -540,8 +696,13 @@ def _save_predictions(
     config.output_dir.mkdir(parents=True, exist_ok=True)
     name = _checkpoint_name(config, seed)
     npz_path = config.output_dir / f"{name}_preds.npz"
-    np.savez(
-        npz_path,
-        y_true=result["y_true"],
-        y_pred=result["y_pred"],
-    )
+    y_true, y_pred = result["y_true"], result["y_pred"]
+    # Bootstrap CI requires y_true/y_pred to be the same length (and the full
+    # test set). A mismatch here would silently corrupt CIs downstream (numpy
+    # broadcast / pandas align), so fail loud at write time.
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"{config.model_type} seed {seed}: pred length mismatch "
+            f"y_true={len(y_true)} vs y_pred={len(y_pred)} — would corrupt bootstrap CI."
+        )
+    np.savez(npz_path, y_true=y_true, y_pred=y_pred)

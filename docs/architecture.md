@@ -38,12 +38,14 @@ smc-data-challenge/
 │   │   ├── schema.py              # ExperimentConfig + nested model/train/data schemas
 │   │   ├── loader.py              # load_config() — merges _base.yaml + override YAML
 │   │   ├── registry.py            # ModelRegistry + LossRegistry (auto-discovered)
-│   │   ├── _model_registrations.py # registers lstm, cnn_lstm, xgboost
+│   │   ├── _model_registrations.py # registers lstm, cnn_lstm, transformer, xlstm, xgb
 │   │   └── _loss_registrations.py  # registers weighted_ce, focal
 │   │
 │   ├── models/                    # model architectures
 │   │   ├── lstm.py                # FVGLSTMClassifier (2-layer unidir, CPU-only)
-│   │   ├── cnn_lstm.py            # FVGCNNLSTMClassifier (Conv1d → LSTM → FC, CPU-only)
+│   │   ├── cnn_lstm.py            # FVGCNNLSTMClassifier (Conv1d → LSTM → FC, CPU-only) — carrier
+│   │   ├── transformer.py        # FVGTransformerClassifier (encoder + pooling, CPU-only, untuned)
+│   │   ├── xlstm_model.py        # FVGxLSTMClassifier (sLSTM stack, v2 API vanilla backend, CPU-only, untuned)
 │   │   └── xgboost_baseline.py    # GBM hyperparameter defaults
 │   │
 │   ├── training/                  # loss + optim + early stop
@@ -273,7 +275,9 @@ sequenceDiagram
 
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `multiseed_run.py` | Multi-seed training sweep (YAML-driven, any model) | `python scripts/rigor/multiseed_run.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --seeds 0 17 42 123 2024 --output-dir reports/rigor/<ts>/` |
+| `multiseed_run.py` | Multi-seed training sweep (YAML-driven, any model incl. transformer/xlstm) | `python scripts/rigor/multiseed_run.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --set 'train.seeds=[0,17,42,123,2024]' --output-dir reports/rigor/<ts>/` |
+| `learning_curve.py` | Data-efficiency learning curve (val F1 vs train fraction, any arch); A2b guard asserts `--train-fraction` honoured | `python scripts/rigor/learning_curve.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --fractions 0.2 0.4 0.6 0.8 1.0 --seeds 42 17 0` |
+| `run_dl_diagnosis_pipeline.sh` | Orchestrates the full DL ladder + learning-curve diagnosis (background, CPU) | `bash scripts/rigor/run_dl_diagnosis_pipeline.sh` |
 | `tune_lstm.py` | Optuna HP search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
 | `tune_xgboost.py` | Optuna HP search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
 | `tune_cnn_lstm.py` | Optuna HP search for CNN-LSTM | `python scripts/rigor/tune_cnn_lstm.py --n-trials 12 --timeout 3600` |

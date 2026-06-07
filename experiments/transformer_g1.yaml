@@ -1,0 +1,27 @@
+# transformer_g1.yaml — Untuned baseline HP for Transformer encoder on ValidFVG target.
+# No Optuna tuning yet (G1 sweep pending). Small encoder: d_model=64, nhead=4, 2 layers.
+# Optimiser: Adam (matches LSTM/CNN-LSTM baseline convention).
+name: transformer_g1_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: transformer
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_feedforward: 128
+  dropout: 0.1
+  head_dropout: 0.3
+  pool: mean
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu
