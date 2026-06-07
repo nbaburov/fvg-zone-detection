@@ -64,6 +64,12 @@ class SeedSweepConfig:
         hp["weight_decay"] = cfg.train.weight_decay
         hp["max_epochs"] = cfg.train.max_epochs
         hp["patience"] = cfg.train.patience
+        # NOTE: max_grad_norm is deliberately NOT forwarded from TrainConfig here.
+        # Doing so would carry a non-None clip into _train_torch_generic for xlstm
+        # too (it shares that loop), changing the committed xlstm baseline. Grad
+        # clip is instead gated by arch == "transformer" inside the loop, and the
+        # warmup_steps knob arrives via cfg.model (transformer model-field). So the
+        # transformer gets stabilisation; lstm/cnn_lstm/xlstm are untouched.
 
         return cls(
             model_type=cfg.model.arch,
@@ -400,7 +406,13 @@ def _train_cnn_lstm(
 # ---------------------------------------------------------------------------
 
 # HP keys that are training-loop params, NOT model constructor args.
-_NON_MODEL_HP = {"batch_size", "lr", "weight_decay", "window_size", "max_epochs", "patience"}
+# warmup_steps / max_grad_norm / scheduler are stabilisation knobs consumed by the
+# training loop below (gated, transformer-only — see _train_torch_generic) and must
+# never reach a model ctor.
+_NON_MODEL_HP = {
+    "batch_size", "lr", "weight_decay", "window_size", "max_epochs", "patience",
+    "warmup_steps", "max_grad_norm", "scheduler", "context_length",
+}
 
 
 def _train_torch_generic(
@@ -464,6 +476,12 @@ def _train_torch_generic(
     # so a window_size sweep can't silently desync the stack from the data.
     if arch == "xlstm":
         model_kwargs["context_length"] = window_size
+    # Keep only kwargs the model constructor accepts. Best-HP JSON from Optuna
+    # carries metadata (val_macro_f1, trial_number, n_trials_completed,
+    # study_name, storage) that must not reach the model ctor.
+    import inspect
+    _valid = set(inspect.signature(MODELS[arch].__init__).parameters) - {"self"}
+    model_kwargs = {k: v for k, v in model_kwargs.items() if k in _valid}
     model = MODELS[arch](**model_kwargs).to(device)
 
     if config.loss_type == "focal":
@@ -478,6 +496,33 @@ def _train_torch_generic(
     patience = int(hp.get("patience", 15))
     early_stop = EarlyStop(patience=patience, mode="max")
 
+    # ---- Stabilisation knobs (GATED — transformer fair-shot only) -----------
+    # LR warmup + gradient clipping help Transformer optimisation but were NOT
+    # used to produce the committed lstm/cnn_lstm baselines. They are gated OFF
+    # by default so every non-transformer arch routed here is byte-for-byte
+    # identical to the original loop:
+    #   - warmup_steps defaults to 0  -> the warmup branch is skipped entirely
+    #     (base lr is never rescaled), so optimiser.step() behaves as before.
+    #   - max_grad_norm defaults to None for non-transformer arches -> no
+    #     clip_grad_norm_ call is made.
+    # Only the Transformer config sets warmup_steps > 0 and/or max_grad_norm, so
+    # only it incurs the warmup ramp and the clip. lstm/cnn_lstm/xlstm leave both
+    # unset -> their training is unchanged and their baselines stay valid.
+    warmup_steps = int(hp.get("warmup_steps", 0))
+    # Gradient clipping is transformer-only by intent. Gate by arch STRUCTURALLY
+    # (not just by hp-dict cleanliness) so a stray max_grad_norm key in a
+    # directly-constructed SeedSweepConfig can never silently clip xlstm and
+    # invalidate its baseline.
+    _default_clip = 1.0 if arch == "transformer" else None
+    raw_max_grad_norm = hp.get("max_grad_norm", _default_clip)
+    max_grad_norm = (
+        float(raw_max_grad_norm)
+        if (raw_max_grad_norm is not None and arch == "transformer")
+        else None
+    )
+    base_lr = lr
+    global_step = 0
+
     best_val_f1 = 0.0
     best_state: dict | None = None
     best_epoch = 0
@@ -491,7 +536,19 @@ def _train_torch_generic(
             logits = model(x_batch)
             loss = criterion(logits, y_batch)
             loss.backward()
+            # Gated grad clip — only when max_grad_norm is set (transformer).
+            if max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            # Gated linear LR warmup — only when warmup_steps > 0 (transformer).
+            if warmup_steps > 0 and global_step < warmup_steps:
+                warm_lr = base_lr * float(global_step) / float(warmup_steps)
+                for pg in optimiser.param_groups:
+                    pg["lr"] = warm_lr
+            elif warmup_steps > 0:
+                for pg in optimiser.param_groups:
+                    pg["lr"] = base_lr
             optimiser.step()
+            global_step += 1
 
         val_f1, _, _ = _eval_f1_all(model, val_loader, device)
 
@@ -520,6 +577,8 @@ def _train_torch_generic(
         "loss_type": config.loss_type,
         "focal_gamma": config.focal_gamma if config.loss_type == "focal" else None,
         "arch": arch,
+        "warmup_steps": warmup_steps,
+        "max_grad_norm": max_grad_norm,
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)

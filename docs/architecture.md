@@ -281,6 +281,8 @@ sequenceDiagram
 | `tune_lstm.py` | Optuna HP search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
 | `tune_xgboost.py` | Optuna HP search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
 | `tune_cnn_lstm.py` | Optuna HP search for CNN-LSTM | `python scripts/rigor/tune_cnn_lstm.py --n-trials 12 --timeout 3600` |
+| `tune_transformer.py` | Optuna HP search for Transformer (warmup+clip gated transformer-only) | `python scripts/rigor/tune_transformer.py --n-trials 50` |
+| `transformer_fairshot_pipeline.sh` | Tuned-Transformer fair-shot: sweep + 5-seed + collapse probe | `bash scripts/rigor/transformer_fairshot_pipeline.sh` |
 | `threshold_sweep.py` | Per-class F1-optimal threshold tuning (single seed) | `python scripts/rigor/threshold_sweep.py --model-path <checkpoint> --model-type lstm` |
 | `threshold_multiseed.py` | Threshold sweep aggregated over 5 seeds | `python scripts/rigor/threshold_multiseed.py --config experiments/cnn_lstm_g1.yaml` |
 | `window_sweep.py` | Window size sensitivity analysis | `python scripts/rigor/window_sweep.py --config <config.yaml> --windows 30 60 90 120` |

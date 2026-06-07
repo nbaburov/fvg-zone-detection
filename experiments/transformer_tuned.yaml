@@ -1,0 +1,40 @@
+# transformer_tuned.yaml — Tuned Transformer HP for the fair-shot 5-seed run on ValidFVG.
+#
+# HOW TO USE:
+#   1. Run the Optuna search (writes reports/rigor/<ts>/best_hp_transformer.json):
+#        python scripts/rigor/tune_transformer.py --n-trials 50 --max-epochs 50
+#   2. Copy the sampled fields from best_hp_transformer.json into the model block
+#      below (d_model, nhead, num_layers, dim_feedforward, dropout, head_dropout,
+#      pool, warmup_steps) and lr / weight_decay into the train block.
+#   3. Run the 5-seed sweep via scripts/training/train.py (or the rigor multiseed
+#      runner) pointed at this YAML.
+#
+# Stabilisation (warmup_steps here + grad-clip auto-gated for arch=transformer in
+# seed_sweep) applies ONLY to the transformer; the lstm/cnn_lstm/xlstm baselines
+# are unaffected. Values below are PLACEHOLDERS until the sweep completes.
+name: transformer_tuned_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+model:
+  arch: transformer
+  d_model: 64           # <- from best_hp_transformer.json
+  nhead: 4              # <- from best_hp_transformer.json (divides d_model)
+  num_layers: 2         # <- from best_hp_transformer.json
+  dim_feedforward: 128  # <- from best_hp_transformer.json
+  dropout: 0.1          # <- from best_hp_transformer.json
+  head_dropout: 0.3     # <- from best_hp_transformer.json
+  pool: mean            # <- from best_hp_transformer.json
+  warmup_steps: 100     # <- from best_hp_transformer.json (0 = off)
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16        # <- from best_hp_transformer.json
+  lr: 0.001             # <- from best_hp_transformer.json
+  weight_decay: 0.0001  # <- from best_hp_transformer.json
+  optimizer: adam
+  scheduler: none
+  max_grad_norm: 1.0    # clip applied (gated to arch=transformer in seed_sweep)
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

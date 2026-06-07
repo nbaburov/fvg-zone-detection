@@ -61,6 +61,10 @@ class TransformerModelConfig(BaseModel):
     dropout: float = 0.1
     head_dropout: float = 0.3
     pool: Literal["mean", "cls"] = "mean"
+    # Stabilisation knob (NOT a ctor arg — stripped via _NON_MODEL_HP and consumed
+    # by the gated transformer-only path in seed_sweep._train_torch_generic).
+    # 0 = warmup off. Sampled by tune_transformer; carried through cfg.model.
+    warmup_steps: int = 0
 
 
 class XLSTMModelConfig(BaseModel):

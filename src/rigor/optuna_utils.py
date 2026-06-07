@@ -300,11 +300,136 @@ class CNNLSTMObjective:
 
 
 # ---------------------------------------------------------------------------
+# Transformer Objective
+# ---------------------------------------------------------------------------
+
+class TransformerObjective:
+    """Optuna callable for Transformer-encoder hyperparameter search.
+
+    Uses train + val loaders only. Test parquet NEVER loaded here.
+    Reports intermediate val Macro F1 per epoch so MedianPruner can prune.
+
+    Applies linear LR warmup + gradient clipping inside the trial loop — the
+    same stabilisation the gated transformer-only path in seed_sweep uses — so
+    the search measures HP under the regime the 5-seed run will train in.
+    nhead is constrained to divide d_model (TransformerEncoderLayer requirement).
+    """
+
+    def __init__(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        class_weights: torch.Tensor,
+        device: torch.device,
+        max_epochs: int = 50,
+        patience: int = 10,
+    ) -> None:
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.class_weights = class_weights
+        self.device = device
+        self.max_epochs = max_epochs
+        self.patience = patience
+
+    def __call__(self, trial: optuna.Trial) -> float:
+        from src.models.transformer import FVGTransformerClassifier
+
+        set_seed(42)  # fixed seed: search measures HP variance, not seed variance
+
+        # Sample hyperparameters
+        d_model = trial.suggest_categorical("d_model", [32, 64, 128])
+        # nhead must divide d_model — restrict the candidate set per d_model.
+        valid_heads = [h for h in (2, 4, 8) if d_model % h == 0]
+        nhead = trial.suggest_categorical("nhead", valid_heads)
+        num_layers = trial.suggest_categorical("num_layers", [1, 2, 3])
+        dim_feedforward = trial.suggest_categorical("dim_feedforward", [64, 128, 256])
+        dropout = trial.suggest_float("dropout", 0.1, 0.5)
+        head_dropout = trial.suggest_float("head_dropout", 0.1, 0.6)
+        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
+        warmup_steps = trial.suggest_categorical("warmup_steps", [0, 100, 500])
+        pool = trial.suggest_categorical("pool", ["mean", "cls"])
+        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+
+        train_ds = self.train_loader.dataset
+        val_ds = self.val_loader.dataset
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=0,
+            pin_memory=False,
+            drop_last=True,
+        )
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=256,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=False,
+        )
+
+        model = FVGTransformerClassifier(
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            head_dropout=head_dropout,
+            pool=pool,
+        ).to(self.device)
+
+        criterion = WeightedCE(self.class_weights.to(self.device))
+        optimiser = torch.optim.Adam(
+            model.parameters(), lr=lr, weight_decay=weight_decay
+        )
+        early_stop = EarlyStop(patience=self.patience, mode="max")
+
+        max_grad_norm = 1.0  # fixed clip — matches seed_sweep transformer default
+        base_lr = lr
+        global_step = 0
+        best_val_f1 = 0.0
+
+        for epoch in range(self.max_epochs):
+            model.train()
+            for x_batch, y_batch in train_loader:
+                x_batch = x_batch.to(self.device)
+                y_batch = torch.as_tensor(y_batch, device=self.device)
+                optimiser.zero_grad()
+                logits = model(x_batch)
+                loss = criterion(logits, y_batch)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                if warmup_steps > 0 and global_step < warmup_steps:
+                    warm_lr = base_lr * float(global_step + 1) / float(warmup_steps)
+                    for pg in optimiser.param_groups:
+                        pg["lr"] = warm_lr
+                elif warmup_steps > 0:
+                    for pg in optimiser.param_groups:
+                        pg["lr"] = base_lr
+                optimiser.step()
+                global_step += 1
+
+            val_f1 = _eval_macro_f1(model, val_loader, self.device)
+            if val_f1 > best_val_f1:
+                best_val_f1 = val_f1
+
+            trial.report(val_f1, epoch)
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+            if early_stop.update(val_f1):
+                break
+
+        return best_val_f1
+
+
+# ---------------------------------------------------------------------------
 # Study runner
 # ---------------------------------------------------------------------------
 
 def run_study(
-    objective: LSTMObjective | XGBObjective,
+    objective: LSTMObjective | XGBObjective | CNNLSTMObjective | TransformerObjective,
     n_trials: int,
     storage_url: str,
     study_name: str,
