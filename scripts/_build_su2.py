@@ -296,8 +296,9 @@ guessing, is the work of this update.
 same raw 60-hour window), the best deep model is **CNN-LSTM**, at a macro-F1 of **0.639 ± 0.013** (95% CI [0.603, 0.674]).
 Macro-F1 gives the rare bull and bear gaps equal weight with the common "none", so 1.0 is perfect and the
 always-say-none baseline scores only 0.328. XGBoost scores **0.721**, but on a different, easier input (35 hand-engineered features),
-so that gap is not a fair architecture verdict. The two *largest* deep models did *worse*, not better:
-**Transformer 0.548** (and unstable) and **xLSTM 0.369**. A decision rule fixed in advance places the
+so that gap is not a fair architecture verdict. The two *largest* deep models did *worse* as untuned
+baselines (**Transformer 0.548**, unstable; **xLSTM 0.369**); and when I later gave the Transformer a fair
+tuned pass it reached only **0.601 ± 0.045**, tying LSTM and still below CNN-LSTM. A decision rule fixed in advance places the
 workable models in the "needs more data" box and rules out "needs a bigger model".
 
 **Subjective reflection (how I worked).** I did not simply crown a winner. I fixed the diagnosis rule
@@ -595,8 +596,10 @@ enough examples, especially of the rare bull and bear gaps, to stop improving.""
     c.append(md("""## 7. Bigger did not help
 
 If the task were limited by model capacity, the Transformer and xLSTM, the most expressive models, should
-have pushed the ceiling up. They did the opposite: the most capable architectures produced the worst
-fair-input scores. So capacity is not the binding constraint."""))
+have pushed the ceiling up. They did not. xLSTM scored far below everything (0.369), and the Transformer,
+even after a dedicated tuning pass (0.601, see Part 8), only reached parity with the recurrent models and
+never beat CNN-LSTM. Adding capacity, even when well-tuned, did not raise the ceiling, so capacity is not
+the binding constraint."""))
 
     # Part 7
     c.append(md("""# Part 7 · The verdict, by the rule I fixed in advance
@@ -625,13 +628,14 @@ The question above was the spine, but a few other things are worth recording.
 - **Why the scores carry a range, not a single number.** Training a network involves randomness, so I run
   every model five times and report the spread. CNN-LSTM (0.639) and LSTM (0.595) overlap once that spread is
   accounted for, which is why I call them a tie rather than declaring a winner the next run might overturn.
-- **Giving the Transformer a fair second chance.** The Transformer did badly partly because it was untuned.
-  So I am running a properly-tuned, stabilised version. Two stabilisers target the collapse: a learning-rate
-  warm-up eases the rate up at the start, and gradient clipping caps how large a single update can be, so one
-  bad batch cannot blow up the weights the way it did on the failed runs. A hyper-parameter search then finds
-  good settings. This answers the obvious objection ("maybe a bigger model just needed tuning") with an
-  experiment instead of an assumption. Based on everything above I expect it to reach parity at best, and I
-  will report whatever it actually does."""))
+- **The Transformer fairness pass is done, and it confirms the prediction.** The untuned Transformer did
+  badly partly because it was untuned, so I gave it a proper tuned, stabilised run: a learning-rate warm-up
+  (easing the rate up at the start), gradient clipping (capping how large a single update can be, so one bad
+  batch cannot blow up the weights the way it did on the failed runs), and an Optuna search over its settings.
+  Tuned, it reaches **0.601 ± 0.045** across five seeds, up from the untuned 0.548, and a wider 10-seed probe
+  gives **0.604 ± 0.050** with no collapse to the majority-only floor. So the earlier instability was largely
+  a tuning artifact. But even properly tuned it only ties LSTM (0.595) and stays below CNN-LSTM (0.639): a
+  fair tuned shot reached parity, not a win, which is exactly what a data-bound task predicts."""))
 
     # Part 8.5 - tooling and product
     c.append(md("""# Part 8b · Tooling and the product surface
@@ -676,13 +680,13 @@ The order matters:
    bear examples the learning curves say the models still want. Every later comparison depends on this
    larger dataset existing, so it is the gate everything else waits behind. It targets the carrier,
    CNN-LSTM, directly.
-2. **Finish the Transformer fairness pass on the current data.** A stabilised, tuned Transformer answers,
-   now, whether the bigger model simply needed better tuning. This closes the "bigger model" door with
-   evidence rather than assumption. (Its test on the larger multi-symbol data is step 3, not this step.)
+2. **The Transformer fairness pass is complete** (Part 8): tuning lifted it to 0.601 ± 0.045 and removed the
+   collapse, which closes the "bigger model just needed tuning" door with evidence: it reaches parity, not a
+   win. The one open question left for it is whether *more data* changes that, which is step 3.
 3. **Re-judge fairly on the big data, but only the models that can plausibly use it.** Once multi-symbol
    data exists, I will tune and re-evaluate the models whose evidence says more data should help:
-   **CNN-LSTM** and **LSTM** (both fit train and have rising curves) and the **Transformer** (fragile now,
-   but the architecture that gains most from scale). **xLSTM is deliberately excluded** from that sweep:
+   **CNN-LSTM** and **LSTM** (both fit train and have rising curves) and the **Transformer** (now tuned to parity,
+   and the architecture that should gain most from scale). **xLSTM is deliberately excluded** from that sweep:
    it cannot fit the training data it already has (train-F1 near 0.34), so more data cannot rescue a model
    that has not learned what it was given; spending a hyper-parameter search on it would not change the
    ranking and is not a good use of limited compute. XGBoost stays as the reference control. This keeps the
@@ -745,14 +749,16 @@ largest models did *worse*, so the task is **data-bound, not capacity-bound**. T
   but the scores currently come straight from the network's softmax. Softmax turns the raw outputs into probabilities that add to one, which does not by itself make them accurate, and I have not verified with a reliability
   diagram that "80% sure" is right about 80% of the time. Calibration assessment is future work.
 - **Learning curves are noisy** over three seeds ("no plateau", not a precise slope).
-- **Transformer and xLSTM are untuned baselines**; the Transformer collapses on some runs (true collapse rate
-  still being measured).
+- **The ladder's Transformer and xLSTM are untuned baselines.** I later tuned the Transformer (Part 8): it
+  rose to 0.601 ± 0.045 and stopped collapsing across a 10-seed probe, so its earlier instability was largely
+  a tuning artifact, but it still did not beat CNN-LSTM. xLSTM stays untuned by choice, since it cannot fit
+  the training data and tuning is unlikely to help.
 - **xLSTM's data-efficiency curve was abbreviated**, since its full-data score is already its ceiling and
   cannot change the ranking.
 
-**Next steps.** Multi-symbol data expansion first, since it is the blocker, aimed at CNN-LSTM; then finish
-the Transformer fairness pass and re-judge the data-hungry models (CNN-LSTM, LSTM, Transformer) on the
-larger set, with xLSTM excluded because it cannot fit the data it already has; build the demo surface;
+**Next steps.** Multi-symbol data expansion first, since it is the blocker, aimed at CNN-LSTM; then re-judge the
+data-hungry models (CNN-LSTM, LSTM, Transformer, now all tuned) on the larger set, with xLSTM excluded
+because it cannot fit the data it already has; build the demo surface;
 final delivery by 20 June."""))
 
     c.append(md("""# References
@@ -887,15 +893,15 @@ The assignment wants a usable detector, not just scores. Two tools already exist
 - **The five-model ladder is finished** and trained under one set of rules, so the comparison is complete.
 - **Scores carry a range, not one number.** Training has randomness, so I run each model five times. CNN-LSTM
   and LSTM overlap once that spread is counted, so I call them a tie instead of declaring a winner.
-- **Giving the Transformer a fair second chance.** It did badly partly because it was untuned, so I am
-  running a properly-tuned version to answer "maybe a bigger model just needed tuning" with an experiment,
-  not an assumption."""))
+- **Transformer fairness pass: done.** Untuned it scored 0.548 and was unstable; tuned (warm-up + clipping +
+  search) it reaches **0.601 ± 0.045** with no collapse over 10 seeds. Still ties LSTM and below CNN-LSTM:
+  a fair tuned shot reached parity, not a win."""))
 
     S(md("""## 10 · Next steps, and why I am confident
 
 **Because it is data-bound, the lever is more and richer data, not a bigger model:**
 1. **Multi-symbol expansion** (QQQ, IWM, sector ETFs) first, the blocker: multiplies the rare gap examples; targets CNN-LSTM.
-2. **Finish the Transformer fairness pass** on current data: close the "bigger model" door with evidence.
+2. **Transformer fairness pass: done** (tuned to 0.601, parity not a win) -> the "bigger model" door is closed; the open question is whether more data helps it (step 3).
 3. **Re-judge on the bigger data** the models that can use it (CNN-LSTM, LSTM, Transformer). xLSTM is excluded: it cannot fit the data it already has.
 4. **Build the demo**: the confidence-scored detector with chart overlays.
 
