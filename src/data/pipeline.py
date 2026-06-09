@@ -12,7 +12,7 @@ import torch
 
 from src.data.labels import LABELLERS
 from src.data.process import build_labelled_dataset
-from src.data.split import temporal_split
+from src.data.split import SPLIT_BOUNDARIES, temporal_split
 from src.data.window import SMCWindowDataset
 
 logger = logging.getLogger(__name__)
@@ -89,14 +89,33 @@ def build_pipeline(
     full_df.to_parquet(full_path)
     logger.info("Full labelled H1 written to %s (%d rows)", full_path, len(full_df))
 
-    # Step 2: Temporal split
-    train_df, val_df, test_df = temporal_split(full_df)
+    # Step 2: Temporal split — capture boundaries explicitly so sidecar and split always agree
+    boundaries = SPLIT_BOUNDARIES
+    train_df, val_df, test_df = temporal_split(full_df, boundaries=boundaries)
 
     # Persist splits
     for name, df_split in [("train", train_df), ("val", val_df), ("test", test_df)]:
         path = out_dir / f"spy_h1_{name}.parquet"
         df_split.to_parquet(path)
         logger.info("Split '%s' written to %s (%d rows)", name, path, len(df_split))
+
+    # Write dataset_meta sidecar — self-documents the provenance of every artifact in this dir
+    meta = {
+        "labeller_name": labeller_name,
+        "window_size": window_size,
+        "start": start,
+        "end": end,
+        "split_boundaries": boundaries,
+        "row_counts": {
+            "train": len(train_df),
+            "val": len(val_df),
+            "test": len(test_df),
+        },
+    }
+    meta_path = out_dir / "dataset_meta.json"
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    logger.info("Dataset meta sidecar written to %s", meta_path)
 
     # Step 3: Class weights from train split only
     num_classes = labeller.num_classes

@@ -160,3 +160,30 @@ def test_train_stride1_val_test_stride60():
     assert len(train_ds) > len(test_ds), (
         f"train ({len(train_ds)}) should have more windows than test ({len(test_ds)})"
     )
+
+
+def test_dataset_meta_sidecar_written_with_correct_boundaries():
+    """dataset_meta.json must be written and contain the canonical SPLIT_BOUNDARIES."""
+    from src.data.split import SPLIT_BOUNDARIES
+
+    full_df = _make_labelled_h1()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with patch("src.data.pipeline.build_labelled_dataset", return_value=full_df):
+            with patch("src.data.pipeline.PROCESSED_DIR", tmpdir):
+                from src.data.pipeline import build_pipeline
+                build_pipeline(labeller_name="fvg_valid", window_size=60)
+
+        meta_path = os.path.join(tmpdir, "dataset_meta.json")
+        assert os.path.exists(meta_path), "dataset_meta.json not written"
+
+        with open(meta_path) as f:
+            meta = json.load(f)
+
+    assert meta["split_boundaries"] == SPLIT_BOUNDARIES, (
+        f"split_boundaries mismatch: {meta['split_boundaries']} != {SPLIT_BOUNDARIES}"
+    )
+    assert meta["labeller_name"] == "fvg_valid"
+    assert meta["window_size"] == 60
+    assert set(meta["row_counts"].keys()) == {"train", "val", "test"}
+    assert all(v > 0 for v in meta["row_counts"].values()), "Expected non-zero row counts"
