@@ -8,6 +8,16 @@ Usage
     python scripts/inspect_models.py --models lstm --dataset data/processed/spy_h1_val.parquet \\
         --start 2023-06 --end 2023-09
 
+    # Per-model checkpoint override (name:path form — mirrors paper_trade.py):
+    python scripts/inspect_models.py --dataset test --models \\
+        cnn_lstm:checkpoints/cnn_lstm_multisym/cnn_lstm/cnn_lstm_seed0.pt \\
+        lstm:checkpoints/lstm_multisym/lstm/lstm_seed0.pt \\
+        transformer:checkpoints/transformer_multisym/transformer/transformer_seed0.pt \\
+        xgboost:checkpoints/xgb_multisym/xgboost/xgb_seed42.ubj
+
+    Bare names (e.g. --models lstm xgboost) use --checkpoint-dir + default seed,
+    exactly as before.  Mixed forms are allowed.
+
 Output is written to reports/inspect/<YYYY-MM-DD_HHMMSS>/.
 
 Notes
@@ -42,9 +52,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--models",
         nargs="+",
-        metavar="NAME",
+        metavar="NAME_OR_NAME:PATH",
         default=None,
-        help="Adapter names to load (e.g. lstm xgboost). Default: all discovered.",
+        help=(
+            "Adapters to load. Each token is either a bare name (e.g. lstm) "
+            "or name:path pointing at a specific checkpoint file "
+            "(e.g. cnn_lstm:checkpoints/cnn_lstm_multisym/cnn_lstm/cnn_lstm_seed0.pt). "
+            "Bare names use --checkpoint-dir + the adapter's default seed. "
+            "Default: all discovered adapters."
+        ),
     )
     parser.add_argument(
         "--dataset",
@@ -209,12 +225,35 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: No adapters discovered. Check src/inspect/adapters/.", file=sys.stderr)
             return 1
         print(f"No --models specified; using all discovered: {model_names}")
+        checkpoint_path_overrides: dict[str, str] = {}
     else:
-        model_names = args.models
+        model_names = []
+        checkpoint_path_overrides = {}
+        for token in args.models:
+            name = token.split(":", 1)[0] if ":" in token else token
+            if name in model_names:
+                print(
+                    f"ERROR: model '{name}' specified more than once in --models. "
+                    "Each adapter may appear at most once.",
+                    file=sys.stderr,
+                )
+                return 1
+            if ":" in token:
+                _, cp_path = token.split(":", 1)
+                # Resolve relative paths from project root
+                p = Path(cp_path)
+                if not p.is_absolute():
+                    p = _ROOT / p
+                model_names.append(name)
+                checkpoint_path_overrides[name] = str(p)
+            else:
+                model_names.append(name)
 
     print(f"Loading adapters: {model_names}")
+    if checkpoint_path_overrides:
+        print(f"Checkpoint overrides: {checkpoint_path_overrides}")
     try:
-        adapters = load_adapters(model_names, checkpoint_dir)
+        adapters = load_adapters(model_names, checkpoint_dir, checkpoint_paths=checkpoint_path_overrides)
     except KeyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

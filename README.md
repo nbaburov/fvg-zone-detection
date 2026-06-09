@@ -66,12 +66,18 @@ python scripts/training/train_lstm.py
 # 5b. (Optional) Evaluate multi-symbol models on fixed SPY test
 python scripts/rigor/eval_spy_test.py --experiment experiments/cnn_lstm_multisym.yaml
 
-# 6. Inspect on unseen data
+# 6. Inspect on unseen data (all 5 archs: lstm, cnn_lstm, transformer, xlstm, xgboost)
 python scripts/inspect_models.py \
     --models lstm xgboost \
     --dataset test \
     --start 2023-01-01 --end 2024-12-31 \
     --lookahead-bars 20 --tp-rr 2.0
+
+# Or with per-model checkpoint overrides (name:path syntax)
+python scripts/inspect_models.py \
+    --models lstm:checkpoints/lstm/lstm_seed42.pt cnn_lstm:checkpoints/cnn_lstm/best.pt transformer xlstm xgboost \
+    --dataset test \
+    --lookahead-bars 20
 
 # 7. (Optional) Live paper trade during market hours
 python scripts/paper_trade.py \
@@ -102,7 +108,7 @@ src/data/      acquisition, labelling, splitting, windowing
 src/features/  feature engineering for non-DL models
 src/models/    architectures (LSTM, CNN-LSTM, Transformer, xLSTM, XGBoost)
 src/training/  loss, early stop, train utils
-src/inspect/   offline model inspection toolkit
+src/inspect/   offline model inspection toolkit (all 5 model adapters, outcome simulation)
 src/live/      live paper-trading harness
 scripts/       CLI entry points (data/, training/, rigor/, inspect_models, paper_trade)
 notebooks/     CRISP-DM presentation notebooks

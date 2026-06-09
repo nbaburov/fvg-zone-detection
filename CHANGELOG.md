@@ -4,6 +4,42 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-09] — inspect/paper-trade all-5-arch tooling
+
+All 5 model architectures are now inspectable and paper-tradeable. Previously only lstm, cnn_lstm, and xgboost had adapters; transformer and xlstm could be trained but not post-hoc analysed or wired into the paper-trading loop.
+
+### Inspect / paper-trade adapter layer
+
+- **`TransformerAdapter`** (`src/inspect/adapters/transformer_adapter.py`) and **`XLSTMAdapter`** (`src/inspect/adapters/xlstm_adapter.py`) — new auto-discovered adapters. Both implement the `ModelAdapter` ABC; the registry discovers them at import time, so `scripts/inspect_models.py` and `scripts/paper_trade.py` support all 5 archs with no whitelist changes.
+- **Per-model checkpoint override** — `scripts/inspect_models.py --models name[:checkpoint_path]` mirrors the existing `paper_trade.py` `name:path` syntax. Each arch's specific checkpoint (e.g. best multisym seed) loads from its own directory in a single command. Backward compatible: bare `name` falls back to `--checkpoint-dir` + default seed.
+- All 5 adapters (`lstm`, `cnn_lstm`, `xgboost`, `transformer`, `xlstm`) gained an optional `checkpoint_path` kwarg. `registry.load_adapters` gained a `checkpoint_paths` mapping so callers can supply per-adapter paths without touching the registry internals.
+- **Registry resilience** — `_discover` now tolerates a single adapter import failure (logs a warning, continues loading the remaining adapters) instead of aborting all inspect/paper-trade runs on a missing optional dep.
+- **xLSTM context_length fix** — `XLSTMAdapter` resolves `context_length` from checkpoint meta `hyperparams.window_size` so it matches the window the model was actually trained on, rather than relying on a hardcoded default.
+
+### Tests
+5 new test files in `tests/inspect/`: `test_transformer_adapter.py`, `test_xlstm_adapter.py`, `test_registry.py` (updated + new coverage), `test_checkpoint_override.py`, `test_xlstm_context_length_fallback.py`. Full suite green.
+
+### Config
+- `experiments/xlstm_multisym.yaml` — xLSTM multisym retrain config (mirrors the pattern of the other `*_multisym.yaml` configs already committed). Training in progress; checkpoints land in a later commit.
+
+### Added
+- `src/inspect/adapters/transformer_adapter.py`
+- `src/inspect/adapters/xlstm_adapter.py`
+- `tests/inspect/test_transformer_adapter.py`, `test_xlstm_adapter.py`, `test_registry.py`, `test_checkpoint_override.py`, `test_xlstm_context_length_fallback.py`
+- `experiments/xlstm_multisym.yaml`
+
+### Changed
+- `src/inspect/adapters/{lstm,cnn_lstm,xgboost}_adapter.py` — added optional `checkpoint_path` kwarg
+- `src/inspect/registry.py` — `_discover` resilience + `checkpoint_paths` support in `load_adapters`
+- `scripts/inspect_models.py` — `name:path` parsing, duplicate-name guard, docstring updates
+- Docs synced: `CLAUDE.md`, `README.md`, `docs/architecture.md`
+
+### Notes
+- Trade-outcome simulation (`--lookahead-bars`) uses a **generic 2R bracket** (gap-edge stop-loss, fixed 2× risk take-profit) for all architectures. This is a placeholder; a researched, SMC-aligned FVG exit strategy is future work and is not claimed as canonical.
+- `checkpoints/xlstm_multisym/` is NOT committed here — training in progress; will land in a subsequent commit alongside the results.
+
+---
+
 ## [2026-06-09]
 
 Phase 4 multi-symbol expansion COMPLETE. Data-bound hypothesis SUPPORTED (directionally strong; not proven at strict 95% due to effective_n=86).

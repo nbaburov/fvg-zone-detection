@@ -60,15 +60,17 @@ smc-data-challenge/
 │   │
 │   ├── inspect/                   # offline model inspection toolkit
 │   │   ├── base.py                # ModelAdapter ABC (shared with src/live)
-│   │   ├── registry.py            # pkg-walks adapters/ and registers
+│   │   ├── registry.py            # pkg-walks adapters/ and registers (resilient: one broken adapter doesn't kill discovery)
 │   │   ├── runner.py              # multi-adapter inference over windows
 │   │   ├── stats.py               # F1, confusion, agreement
-│   │   ├── outcomes.py            # TP/SL/undecided walk over future bars
+│   │   ├── outcomes.py            # Trade-outcome simulation: bracket entry (next H1 open), generic 2R fixed-TP + gap-edge SL, walk future bars for first TP/SL touch
 │   │   ├── viz.py                 # Plotly per-window + per-model timeline
 │   │   ├── report.py              # writes summary.md + HTML plots
 │   │   └── adapters/              # drop a file here = new model auto-discovered
 │   │       ├── lstm_adapter.py
 │   │       ├── cnn_lstm_adapter.py
+│   │       ├── transformer_adapter.py
+│   │       ├── xlstm_adapter.py
 │   │       ├── xgboost_adapter.py
 │   │       └── _xgb_worker.py     # subprocess for Python 3.14+ segfault workaround
 │   │
@@ -173,7 +175,7 @@ flowchart LR
         ST[stats.py]
         OC[outcomes.py]
         VZ[viz.py]
-        AD["adapters/<br/>lstm + cnn_lstm + xgboost"]
+        AD["adapters/<br/>lstm + cnn_lstm + transformer + xlstm + xgboost"]
     end
 
     subgraph LIV["src/live/"]
@@ -303,7 +305,7 @@ sequenceDiagram
 
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `inspect_models.py` | Offline model inspection on test set with TP/SL outcome simulation | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` |
+| `inspect_models.py` | Offline model inspection on test set with TP/SL outcome simulation (all 5 models; supports per-model checkpoint override with name:path syntax) | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` or `--models lstm:path/to/checkpoint cnn_lstm transformer xlstm xgboost` |
 | `paper_trade.py` | Live paper trading via Alpaca (one process per model) | `python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001` |
 
 ## Tools / external services

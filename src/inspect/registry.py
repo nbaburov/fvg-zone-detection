@@ -7,12 +7,15 @@ adapter is: create the file, set ``name``, implement ``predict_proba``. Done.
 from __future__ import annotations
 
 import importlib
+import logging
 import pkgutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.inspect.base import ModelAdapter
+
+logger = logging.getLogger(__name__)
 
 # Populated by _discover() on first access
 _REGISTRY: dict[str, type["ModelAdapter"]] | None = None
@@ -27,7 +30,16 @@ def _discover() -> dict[str, type["ModelAdapter"]]:
 
     for _finder, module_name, _ispkg in pkgutil.iter_modules([str(adapters_path)]):
         full_name = f"{adapters_pkg}.{module_name}"
-        importlib.import_module(full_name)
+        try:
+            importlib.import_module(full_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Skipping adapter %r — import failed: %s: %s",
+                full_name,
+                type(exc).__name__,
+                exc,
+            )
+            continue
 
     registry: dict[str, type[ModelAdapter]] = {}
     for cls in _all_subclasses(ModelAdapter):
@@ -57,7 +69,12 @@ def list_available() -> list[str]:
     return sorted(_get_registry().keys())
 
 
-def load_adapters(names: list[str], checkpoint_dir: Path, **kwargs) -> list["ModelAdapter"]:
+def load_adapters(
+    names: list[str],
+    checkpoint_dir: Path,
+    checkpoint_paths: dict[str, str] | None = None,
+    **kwargs,
+) -> list["ModelAdapter"]:
     """Instantiate adapters by name.
 
     Parameters
@@ -66,6 +83,14 @@ def load_adapters(names: list[str], checkpoint_dir: Path, **kwargs) -> list["Mod
         Adapter names to load. Each must be registered.
     checkpoint_dir : Path
         Passed to each adapter constructor as the first positional argument.
+        Used for any adapter whose name is not present in ``checkpoint_paths``.
+    checkpoint_paths : dict[str, str] | None
+        Optional per-model checkpoint file overrides. Keys are adapter names;
+        values are absolute or relative paths to specific checkpoint files.
+        When a name is present here the adapter receives
+        ``checkpoint_path=<value>`` and skips the default
+        ``<checkpoint_dir>/<arch>/<file>`` resolution.  Names absent from
+        this dict fall back to the standard ``checkpoint_dir`` behaviour.
     **kwargs
         Extra keyword arguments forwarded to each adapter constructor.
 
@@ -80,6 +105,7 @@ def load_adapters(names: list[str], checkpoint_dir: Path, **kwargs) -> list["Mod
         If any name is not registered.
     """
     registry = _get_registry()
+    per_model = checkpoint_paths or {}
     adapters = []
     for name in names:
         if name not in registry:
@@ -87,5 +113,8 @@ def load_adapters(names: list[str], checkpoint_dir: Path, **kwargs) -> list["Mod
             raise KeyError(
                 f"Unknown adapter '{name}'. Available: {available}"
             )
-        adapters.append(registry[name](checkpoint_dir, **kwargs))
+        extra = dict(kwargs)
+        if name in per_model:
+            extra["checkpoint_path"] = per_model[name]
+        adapters.append(registry[name](checkpoint_dir, **extra))
     return adapters

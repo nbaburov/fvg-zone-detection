@@ -54,10 +54,14 @@ class XGBoostAdapter(ModelAdapter):
         self,
         checkpoint_dir: Path,
         checkpoint_file: str = _DEFAULT_CHECKPOINT,
+        checkpoint_path: Path | None = None,
         **_kwargs,
     ) -> None:
-        checkpoint_dir = Path(checkpoint_dir)
-        self._checkpoint_path = checkpoint_dir / "xgboost" / checkpoint_file
+        if checkpoint_path is not None:
+            self._checkpoint_path = Path(checkpoint_path)
+        else:
+            checkpoint_dir = Path(checkpoint_dir)
+            self._checkpoint_path = checkpoint_dir / "xgboost" / checkpoint_file
         if not self._checkpoint_path.exists():
             raise FileNotFoundError(
                 f"XGBoost checkpoint not found: {self._checkpoint_path}"

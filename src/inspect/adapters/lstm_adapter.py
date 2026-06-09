@@ -31,10 +31,14 @@ class LSTMAdapter(ModelAdapter):
         self,
         checkpoint_dir: Path,
         checkpoint_file: str = _DEFAULT_CHECKPOINT,
+        checkpoint_path: Path | None = None,
         **_kwargs,
     ) -> None:
-        checkpoint_dir = Path(checkpoint_dir)
-        checkpoint_path = checkpoint_dir / "lstm" / checkpoint_file
+        if checkpoint_path is not None:
+            checkpoint_path = Path(checkpoint_path)
+        else:
+            checkpoint_dir = Path(checkpoint_dir)
+            checkpoint_path = checkpoint_dir / "lstm" / checkpoint_file
         if not checkpoint_path.exists():
             raise FileNotFoundError(
                 f"LSTM checkpoint not found: {checkpoint_path}"
