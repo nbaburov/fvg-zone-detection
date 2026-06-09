@@ -43,11 +43,17 @@ def _window_generator(
     1. Label candle is at position i + window_size - 1 (i.e., i+59 for 60-bar windows).
     2. The label at that position must be present in df['label'] (already encoded).
     3. If drop_cross_session_windows=True, skip windows with any consecutive pair >90 min apart.
+    4. If df contains a 'symbol' column, skip any window whose bars span more than one symbol
+       (guards against cross-symbol boundary contamination after multi-symbol pooling).
+       This check is entirely optional — single-symbol DataFrames without the column are
+       unaffected and behave identically to the pre-multi-symbol code path.
     """
     n = len(df)
     ohlcv_cols = ["open", "high", "low", "close", "volume"]
     ohlcv = df[ohlcv_cols].to_numpy(dtype=np.float64)
     labels = df["label"].to_numpy(dtype=np.int64)
+    has_symbol_col: bool = "symbol" in df.columns
+    symbols = df["symbol"].to_numpy() if has_symbol_col else None
 
     for i in range(0, n - window_size + 1, stride):
         label_pos = i + window_size - 1
@@ -55,6 +61,9 @@ def _window_generator(
             break
 
         if drop_cross_session_windows and _has_session_gap(df, i, i + window_size):
+            continue
+
+        if has_symbol_col and len(set(symbols[i : i + window_size])) > 1:
             continue
 
         raw_window = ohlcv[i : i + window_size]

@@ -1,4 +1,4 @@
-"""Alpaca minute-bar download and H1 resample for SPY."""
+"""Alpaca minute-bar download and H1 resample for equity symbols."""
 
 from __future__ import annotations
 
@@ -148,22 +148,41 @@ def _tag_session_type(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def download_spy_h1(
+def download_h1(
+    symbol: str,
     start: str = "2018-01-01",
     end: str | None = "2025-12-31",
     use_cache: bool = True,
-    cache_path: str = "data/raw/spy_minute.parquet",
+    cache_path: str | None = None,
 ) -> pd.DataFrame:
     """
-    Download SPY 1-minute bars from Alpaca, resample to H1, and return cleaned DataFrame.
+    Download 1-minute bars for *symbol* from Alpaca, resample to H1, and return a cleaned DataFrame.
+
+    RTH filter: 09:30–15:59 ET. Resample: closed='left', label='left', offset='30min'.
+    Validation: _validate_ohlc (zero-volume + OHLC-integrity), adjustment='raw'.
 
     Returns H1 DataFrame with DatetimeIndex (America/New_York, bar open time).
     Columns: open, high, low, close, volume (float64), session_type (Categorical: 'full'|'half').
     Index frequency: not guaranteed regular (gaps for holidays/weekends — expected).
+    No symbol column is added here; that is the caller's responsibility.
 
-    Raises: EnvironmentError if ALPACA_API_KEY or ALPACA_SECRET_KEY not set.
-    Raises: ValueError if returned bar count < 5000 (sanity check for full multi-year pull).
+    Args:
+        symbol:     Ticker string, e.g. "SPY", "QQQ".
+        start:      ISO date string for the start of the requested range.
+        end:        ISO date string for the end of the requested range, or None for today.
+        use_cache:  When True, read from / write to a local parquet cache to avoid repeat API calls.
+        cache_path: Path to the minute-bar parquet cache. Defaults to
+                    ``data/raw/<symbol_lower>_minute.parquet``.
+
+    Raises:
+        EnvironmentError: if ALPACA_API_KEY or ALPACA_SECRET_KEY not set.
+        ValueError:       if returned bar count < 5000 for a multi-year pull (sanity check).
     """
+    symbol_upper = symbol.upper()
+
+    if cache_path is None:
+        cache_path = f"data/raw/{symbol.lower()}_minute.parquet"
+
     cache = Path(cache_path)
 
     # Cache hit: load minute bars from parquet, skip API call
@@ -193,21 +212,22 @@ def download_spy_h1(
     if end is None:
         end = pd.Timestamp.now(tz="America/New_York").strftime("%Y-%m-%d")
 
-    logger.info("Downloading SPY minute bars from Alpaca: %s to %s", start, end)
+    logger.info("Downloading %s minute bars from Alpaca: %s to %s", symbol_upper, start, end)
 
     client = StockHistoricalDataClient(api_key=key, secret_key=secret)
     request = StockBarsRequest(
-        symbol_or_symbols="SPY",
+        symbol_or_symbols=symbol_upper,
         timeframe=TimeFrame.Minute,
         start=start,
         end=end,
+        adjustment="raw",
     )
     bar_set = client.get_stock_bars(request)
     minute_df = bar_set.df
 
     # If multi-index (symbol, timestamp), drop symbol level
     if isinstance(minute_df.index, pd.MultiIndex):
-        minute_df = minute_df.xs("SPY", level=0)
+        minute_df = minute_df.xs(symbol_upper, level=0)
 
     # Ensure tz-aware UTC → NY
     if minute_df.index.tz is None:
@@ -231,3 +251,18 @@ def download_spy_h1(
     _sanity_check_bar_count(h1, start, end)
 
     return h1
+
+
+def download_spy_h1(
+    start: str = "2018-01-01",
+    end: str | None = "2025-12-31",
+    use_cache: bool = True,
+    cache_path: str = "data/raw/spy_minute.parquet",
+) -> pd.DataFrame:
+    """
+    Thin wrapper around download_h1 for SPY. Preserved for backward compatibility.
+
+    All existing callers and tests continue to work without modification.
+    See download_h1 for full documentation.
+    """
+    return download_h1("SPY", start=start, end=end, use_cache=use_cache, cache_path=cache_path)

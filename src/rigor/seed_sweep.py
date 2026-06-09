@@ -690,6 +690,19 @@ def _load_splits(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFra
     train = pd.read_parquet(data_dir / "spy_h1_train.parquet")
     val = pd.read_parquet(data_dir / "spy_h1_val.parquet")
     test = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+    # Multi-symbol parquets must have same-symbol bars contiguous and sorted so
+    # _window_generator's cross-symbol guard works correctly.  Parquet spec does
+    # not guarantee row order on reload, so re-sort here using the same pattern
+    # as _pool_timeseries in pipeline.py.  This is a NO-OP for single-symbol
+    # data (no "symbol" column).
+    def _sort_if_multisym(df: pd.DataFrame) -> pd.DataFrame:
+        if "symbol" not in df.columns:
+            return df
+        return df.assign(_ts=df.index).sort_values(["symbol", "_ts"]).drop(columns="_ts")
+
+    train = _sort_if_multisym(train)
+    val = _sort_if_multisym(val)
+    test = _sort_if_multisym(test)
     return train, val, test
 
 

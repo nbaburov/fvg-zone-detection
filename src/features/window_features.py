@@ -74,15 +74,30 @@ def extract_window_features(
     v = df["volume"].to_numpy(dtype=np.float64)
     lbl = df["label"].to_numpy(dtype=int)
 
+    # Cross-symbol guard: mirrors src/data/window.py::_window_generator.
+    # When df has a 'symbol' column (pooled multi-symbol frame), skip any window
+    # whose bars span >1 symbol — mixing two unrelated price series is silent
+    # contamination.  Single-symbol DataFrames without the column are entirely
+    # unaffected and follow the identical code path as before.
+    has_symbol_col: bool = "symbol" in df.columns
+    symbols: np.ndarray | None = df["symbol"].to_numpy() if has_symbol_col else None
+
     # Window endpoints: t from window_size-1 to len(df)-1, step=stride
     t_indices = list(range(window_size - 1, len(df), stride))
 
-    n_windows = len(t_indices)
-    X = np.zeros((n_windows, 35), dtype=np.float32)
-    y = np.zeros(n_windows, dtype=int)
+    # Pre-allocate for worst case; trim to actual count after the loop.
+    n_max = len(t_indices)
+    X = np.zeros((n_max, 35), dtype=np.float32)
+    y = np.zeros(n_max, dtype=int)
+    out_idx: int = 0
 
-    for j, t in enumerate(t_indices):
+    for t in t_indices:
         start = t - window_size + 1  # inclusive
+
+        # Skip windows that cross a symbol boundary (multi-symbol path only).
+        if has_symbol_col and len(set(symbols[start: t + 1])) > 1:  # type: ignore[index]
+            continue
+
         # Slices for the full window
         c_w = c[start: t + 1]   # shape (60,)
         h_w = h[start: t + 1]
@@ -91,8 +106,13 @@ def extract_window_features(
         v_w = v[start: t + 1]
 
         feats = _compute_features(c_w, h_w, l_w, o_w, v_w)
-        X[j] = feats
-        y[j] = lbl[t]
+        X[out_idx] = feats
+        y[out_idx] = lbl[t]
+        out_idx += 1
+
+    # Trim to actual number of emitted windows.
+    X = X[:out_idx]
+    y = y[:out_idx]
 
     # NaN guard: fill any NaN/inf with 0
     np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0, copy=False)

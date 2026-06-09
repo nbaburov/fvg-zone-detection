@@ -123,6 +123,12 @@ def main() -> None:
             output_dir=ts_dir,
             checkpoint_dir=ROOT / args.checkpoint_dir,
         )
+        # ROOT-anchor data_dir: YAML values may be relative (e.g. "data/processed/multisym").
+        # The JSON branch always does ROOT / data_dir; mirror that here so the same relative
+        # path resolves correctly regardless of process cwd.
+        _dd = sweep_cfg.data_dir
+        if not _dd.is_absolute():
+            sweep_cfg.data_dir = ROOT / _dd
 
     else:
         # Legacy path: JSON config
