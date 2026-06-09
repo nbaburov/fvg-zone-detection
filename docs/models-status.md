@@ -1,4 +1,4 @@
-# Models Status — 2026-05-13
+# Models Status — 2026-06-09
 
 What is trained, what data it saw, what splits we have, how it performs, what's validated.
 
@@ -20,6 +20,23 @@ Updated 07-Jun-26. Diagnosis gate: `reports/rigor/07-Jun-26/dl_diagnosis_decisio
 **Current best (DL, fair raw-window input):** CNN-LSTM, 0.639 ± 0.013. XGB (0.721) leads overall but on engineered-feature input — not a pure-architecture comparison.
 
 **Progression:** XGBoost → LSTM → **CNN-LSTM (carrier)** → Transformer → xLSTM. Ladder is now COMPLETE (5 archs). Diagnosis: the recurrent models (LSTM/CNN-LSTM) are **data + regularisation-bound** (fit train at 0.83–0.95, learning curves show **no plateau** through full data — non-monotonic over 3 seeds, so "no plateau" not a precise slope) → lever = multi-symbol data. The two larger archs did *worse*, for different reasons: **xLSTM underfits** (train F1 0.33–0.40, cannot fit train), **Transformer fits + generalises on 4/5 seeds (val 0.58–0.61) but is high-variance** (seed42 collapse, std 0.095). Neither beats CNN-LSTM → **task is not capacity-bound**. Multi-symbol is the lever for the recurrent models, NOT the larger archs (xLSTM must fit first; Transformer must be stabilised). Transformer/xLSTM are untuned baselines (no Optuna).
+
+## Phase 4 — Multi-Symbol Data Expansion (09-Jun-26)
+
+**Pooled train (SPY+QQQ+IWM+DIA):** all symbols aligned 2016-01..2021-12, ~10.5k rows/symbol. Pooled bull FVG positives: 817 (vs SPY-only 201 = **4.06×**); bear: 531 (vs 142 = **3.74×**). **Fixed SPY-only test (5,257 rows)** preserved as apples-to-apples headline metric.
+
+**Results — bootstrap CI (1000 iter, block=60, effective_n=86) vs SPY-only baselines:**
+
+| Model | Baseline [CI] | Multisym [CI] | Δ | bear_f1 base→multi | Verdict |
+|-------|-------|-------|------|---|---|
+| CNN-LSTM (carrier) | 0.639 [0.603, 0.674] | **0.675** [0.637, 0.710] | +0.036 | 0.439→0.505 | **data-bound SUPPORTED** |
+| LSTM | 0.595 [0.560, 0.628] | **0.640** [0.604, 0.677] | +0.045 | →0.448 | tied (CI overlap), point up |
+| Transformer (tuned) | 0.601 | **0.577** [0.549, 0.602] | − | seed42 collapse | instability-bound (data didn't help) |
+| XGB | 0.721 [0.671, 0.761] | **0.738** [0.689, 0.779] | +0.017 | →0.603 | tied, point up |
+
+**Honest assessment:** CNN-LSTM multisym mean **0.675 clears the pre-registered 0.674 threshold** (all 5 seeds >0.666, std 0.005, bear_f1 +0.066 mechanism gain) → by the pre-registered rule, **data-bound confirmed**. However, bootstrap CI lower (0.637) *just* misses the baseline point (0.639) → at strict 95%, CIs **overlap**; with effective_n=86, the test lacks power to reject overlap cleanly. **Report as "data-bound supported / directionally strong"** rather than "proven at 95%." The bear_f1 gain and consistent per-seed improvement are the strongest corroborators. **Only Transformer failed to improve (seed42 collapse) — confirming it is instability-bound, not data-bound.** That contrast is the clean narrative.
+
+Artifact: `reports/rigor/09-Jun-26/phase4_verdict.md`, `reports/rigor/09-Jun-26/bootstrap_ci_multisym/`
 
 ## Stack
 

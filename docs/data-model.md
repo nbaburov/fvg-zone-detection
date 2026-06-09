@@ -40,10 +40,50 @@ Temporal split — no shuffle.
 Label column: `fvg_valid`. Schema = `spy_h1.parquet` schema.
 
 ### `data/processed/class_weights.json`
-Inverse-frequency weights computed on train split, consumed by `WeightedCE`.
+Inverse-frequency weights computed on SPY-only train split, consumed by `WeightedCE`.
 
 ```json
 {"0": 0.34, "1": 50.21, "2": 48.93}
+```
+
+### Multi-symbol dataset (phase-4 expansion) — `data/processed/multisym/`
+
+#### `{spy,qqq,iwm,dia}_h1.parquet`
+Per-symbol H1 bars with labels, 2016–2025 (full history used for downstream alignment). Schema = `spy_h1.parquet` schema (timestamp index, OHLCV columns + fvg/fvg_valid labels).
+
+#### `multisym_h1_{train,val,test}.parquet`
+Pooled concatenation of all 4 symbols after split (per-symbol temporal split, then row-stacked). Row counts:
+- train: ~42k rows (10.5k/symbol × 4, 2016–2021)
+- val: ~7k rows (1.75k/symbol × 4, 2022)
+- test: ~21k rows (5.25k/symbol × 4, 2023–2025)
+
+Label distribution (pooled train, fvg_valid):
+- Bull: 817 (vs SPY-only 201, **4.06×**)
+- Bear: 531 (vs SPY-only 142, **3.74×**)
+- None: ~41k
+
+#### `dataset_meta.json`
+Split metadata + provenance.
+
+```json
+{
+  "symbols": ["spy", "qqq", "iwm", "dia"],
+  "train_rows_per_symbol": {"spy": 10577, "qqq": 10540, ...},
+  "test_rows_per_symbol": {"spy": 5257, ...},
+  "train_date_range": ["2016-01-04", "2021-12-31"],
+  "test_date_range": ["2023-01-03", "2025-12-30"],
+  "pooled_train_bull": 817,
+  "pooled_train_bear": 531,
+  "cross_symbol_window_guard": true,
+  "split_boundary_provenance": {...}
+}
+```
+
+#### `class_weights_multisym.json`
+Inverse-frequency weights computed on pooled multi-symbol train, consumed by `WeightedCE` in multi-symbol models.
+
+```json
+{"0": 0.00097, "1": 0.0612, "2": 0.0941}
 ```
 
 ### `data/gold_labels.csv`
@@ -73,6 +113,8 @@ ModelAdapter.predict_proba(windows: np.ndarray) -> np.ndarray
   windows shape: (N, 60, 5)
   return shape:  (N, 3)  — class probabilities for {none, bull, bear}
 ```
+
+**Multi-symbol note:** In `src/data/window.py::_window_generator` and `src/features/window_features.py` (XGB path), cross-symbol window guards enforce that no window contains bars from different symbols (temporal-continuity assertion). Pooled models must reload data with `_sort_if_multisym` helper in `src/rigor/seed_sweep.py` to preserve per-symbol ordering.
 
 ## Live session logs (`logs/paper/<session-id>/`)
 

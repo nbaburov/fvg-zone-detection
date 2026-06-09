@@ -8,21 +8,26 @@ What lives where + which script does what.
 smc-data-challenge/
 ├── data/                          # all on-disk data (gitignored except .gitkeep + gold)
 │   ├── raw/spy_minute.parquet     # 1-min SPY bars from Alpaca
-│   ├── processed/                 # H1 + splits + class weights
+│   ├── processed/                 # H1 + splits + class weights (SPY-only)
 │   │   ├── spy_h1.parquet          # H1 bars with fvg_valid + fvg label columns
 │   │   ├── spy_h1_{train,val,test}.parquet  # 2016–2021/2022/2023–2025 temporal split
 │   │   ├── class_weights.json      # alias for class_weights_fvg_valid.json
 │   │   └── class_weights_fvg_valid.json
+│   ├── processed/multisym/        # multi-symbol H1 + splits + pooled class weights (phase-4)
+│   │   ├── {spy,qqq,iwm,dia}_h1.parquet    # per-symbol H1 bars with labels (2016–2021)
+│   │   ├── multisym_h1_{train,val,test}.parquet  # pooled (SPY+QQQ+IWM+DIA) temporal splits
+│   │   ├── dataset_meta.json      # split metadata + per-symbol row counts + symbols list
+│   │   └── class_weights_multisym.json  # pooled inverse-frequency weights
 │   └── gold_labels.csv            # human-annotated validation set
 │
 ├── src/                           # all importable code
-│   ├── data/                      # acquisition, labelling, splitting, windowing
-│   │   ├── download.py            # Alpaca SDK → raw parquet
+│   ├── data/                      # acquisition, labelling, splitting, windowing, multi-symbol pipeline
+│   │   ├── download.py            # Alpaca SDK → raw parquet; download_h1(symbol) generalised
 │   │   ├── process.py             # 1-min → H1, RTH filter, integrity checks
 │   │   ├── normalize.py           # per-window min-max (used live + offline)
-│   │   ├── split.py               # temporal split, no shuffle
-│   │   ├── window.py              # 60-bar sliding windows + session gap helper
-│   │   ├── pipeline.py            # build_pipeline orchestrator
+│   │   ├── split.py               # temporal split, no shuffle; SPLIT_BOUNDARIES provenance sidecar
+│   │   ├── window.py              # 60-bar sliding windows + session gap helper + cross-symbol guard
+│   │   ├── pipeline.py            # build_pipeline (SPY-only) + build_multi_symbol_pipeline orchestrators
 │   │   ├── annotate.py            # gold-set sampler + Plotly window renderer
 │   │   └── labels/                # labeller package
 │   │       ├── base.py            # BaseLabeller ABC + LABELLERS registry
@@ -80,14 +85,15 @@ smc-data-challenge/
 │   ├── data/                      # data utilities
 │   │   ├── annotate_gold_set.py   # interactive Plotly gold-set annotation
 │   │   ├── count_valid_fvg.py     # sparsity gate for ValidFVGLabeller tuning
+│   │   ├── depth_probe.py         # D9 gate — multi-symbol readiness verification
 │   │   └── persist_labels.py      # deprecated — exits 0 with notice (labels now in spy_h1.parquet)
 │   ├── training/                  # model training
 │   │   ├── train_lstm.py          # train + save LSTM
 │   │   ├── train_cnn_lstm.py      # train + save CNN-LSTM
 │   │   ├── train_xgboost.py       # train + save XGBoost
 │   │   └── train.py               # generic YAML-driven trainer (all models)
-│   ├── rigor/                     # rigor sprint tools (tuning, analysis)
-│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation (YAML-driven)
+│   ├── rigor/                     # rigor sprint tools (tuning, analysis, phase-4)
+│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation (YAML-driven); _sort_if_multisym guard
 │   │   ├── tune_lstm.py           # Optuna HP search for LSTM
 │   │   ├── tune_xgboost.py        # Optuna HP search for XGBoost
 │   │   ├── tune_cnn_lstm.py       # Optuna HP search for CNN-LSTM
@@ -99,6 +105,7 @@ smc-data-challenge/
 │   │   ├── bootstrap_ci_multiseed.py # bootstrap CI aggregated over 5 seeds
 │   │   ├── naive_baselines.py     # majority-class + uniform-random baselines
 │   │   ├── shap_xgb.py            # SHAP feature importance (Gap 5)
+│   │   ├── eval_spy_test.py       # evaluate multi-symbol models on fixed SPY test (phase-4)
 │   │   └── _workers/              # subprocess workers (Python 3.14 segfault workaround)
 │   │       ├── _xgb_sweep_worker.py
 │   │       ├── _xgb_tune_worker.py

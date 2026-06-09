@@ -4,6 +4,49 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-09]
+
+Phase 4 multi-symbol expansion COMPLETE. Data-bound hypothesis SUPPORTED (directionally strong; not proven at strict 95% due to effective_n=86).
+
+### Multi-symbol training pipeline
+- `build_multi_symbol_pipeline` pools SPY + QQQ + IWM + DIA (2016–2021 train, 2022 val, 2023–2025 test), each symbol processed independently then concatenated. Minority bull/bear-FVG positives multiplied **4.06×/3.74×** vs SPY-only baseline.
+- `download_h1(symbol)` generalised — raw minute parquets `data/raw/{qqq,iwm,dia}_minute.parquet` tracked per repo convention (~131 MB total, all <100 MB each).
+- Cross-symbol window guards: `src/data/window.py` + `src/features/window_features.py` XGB path now enforce no window spans a symbol boundary. `_sort_if_multisym` reload guard prevents silent sort-loss on parquet round-trip.
+- `adjustment="raw"` fix applied consistently across all symbol pulls.
+- `dataset_meta.json` sidecar extended with `symbols` field; pooled processed parquets under `data/processed/multisym/`.
+
+### New tooling
+- `scripts/data/depth_probe.py` — D9 gate confirming each symbol has sufficient history before pooling (already committed 2026-06-09 in prior commit).
+- `scripts/rigor/eval_spy_test.py` + `scripts/rigor/_workers/_xgb_eval_spy_worker.py` — fixed SPY-only test-set evaluator so multi-symbol-trained models are benchmarked on the same held-out SPY slice as the single-symbol baselines (apples-to-apples).
+- `experiments/transformer_multisym.yaml`, `experiments/xgb_multisym.yaml` (cnn_lstm + lstm multisym configs committed in pipeline commit).
+- `scripts/rigor/multiseed_run.py` — XGB cross-symbol reload sort fix.
+
+### Results (fixed SPY-only test, bootstrap CI 1000-iter block=60, effective_n≈86)
+| Model | SPY-only F1 | Multi-sym F1 | Δ | bear_f1 |
+|---|---|---|---|---|
+| CNN-LSTM | 0.639 [0.603, 0.674] | **0.675 [0.637, 0.710]** | +0.036 | 0.439 → 0.505 |
+| LSTM | 0.595 | **0.640** | +0.045 | — |
+| XGB | 0.721 | **0.738** | +0.017 | — |
+| Transformer | 0.601 | 0.577 | −0.024 | seed42 collapse persists |
+
+**Verdict:** data-bound hypothesis SUPPORTED. CNN-LSTM clears the pre-registered 0.674 threshold and all 5 seeds exceed 0.666. However bootstrap CIs overlap at strict 95% (effective_n=86 on the SPY test slice) — result is "supported, directionally strong, not proven at 95%". Transformer failed to improve, confirming it is instability-bound rather than data-bound. Full rationale in `reports/rigor/09-Jun-26/phase4_verdict.md`.
+
+### Added
+- `scripts/rigor/eval_spy_test.py`, `scripts/rigor/_workers/_xgb_eval_spy_worker.py`
+- `experiments/transformer_multisym.yaml`, `experiments/xgb_multisym.yaml`
+- `checkpoints/{cnn_lstm,lstm,transformer,xgb}_multisym/` — all per-seed `.pt`/`.ubj` + meta (tracked per repo convention)
+- `data/processed/multisym/` — pooled train/val/test parquets + class_weights + dataset_meta
+- `data/raw/{qqq,iwm,dia}_minute.parquet` — raw minute bars (tracked per repo convention)
+- `reports/rigor/09-Jun-26/phase4_verdict.md`, bootstrap CI JSONs (×4), `spy_test_eval.json`
+
+### Changed
+- `scripts/rigor/multiseed_run.py` — XGB cross-symbol reload sort guard
+- Docs synced: `CLAUDE.md`, `README.md`, `docs/architecture.md`, `docs/data-model.md`, `docs/models-status.md`
+
+### Notes
+- Ephemeral artifacts NOT committed: `spytest_preds/*.npz`, `*.log`, `depth_probe.json` (ephemeral probe output), run-output dirs under `reports/rigor/09-Jun-26/{cnn_lstm,lstm,transformer,xgb}_multisym/`.
+- Next lever: additional symbols (e.g. GLD, TLT) or longer history could push past the 95% CI threshold with higher effective_n.
+
 ## [2026-06-07]
 
 DL ladder completed (5 archs) + data-vs-capacity diagnosis. CNN-LSTM confirmed carrier; task is data-bound.

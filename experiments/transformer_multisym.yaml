@@ -1,0 +1,37 @@
+# transformer_multisym.yaml — Tuned Transformer multi-symbol retrain (Phase 4).
+# HP identical to the fair-shot tuned Transformer (val macro-F1 0.564 sweep,
+# 0.601 +/- 0.045 over 5 seeds), sourced from
+#   reports/rigor/transformer_fairshot_2026-06-07_183725/sweep/.../best_hp_transformer.json
+# Only change vs that run: data.data_dir points at the pooled multi-symbol splits
+# produced by build_multi_symbol_pipeline(["SPY","QQQ","IWM","DIA"], start="2016-01-01").
+# Same seeds as the SPY baseline so the comparison is not confounded by seed variation.
+# Stabilisation (warmup_steps + max_grad_norm) is auto-gated to arch=transformer in
+# seed_sweep; lstm/cnn_lstm baselines are unaffected.
+# Run via: python scripts/rigor/multiseed_run.py --model transformer --config experiments/transformer_multisym.yaml
+name: transformer_multisym_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+  data_dir: data/processed/multisym
+model:
+  arch: transformer
+  d_model: 64
+  nhead: 4
+  num_layers: 1
+  dim_feedforward: 128
+  dropout: 0.2218455076693483
+  head_dropout: 0.14883605700319194
+  pool: mean
+  warmup_steps: 100
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 0.0023359635026261607
+  weight_decay: 2.091498132903561e-05
+  optimizer: adam
+  scheduler: none
+  max_grad_norm: 1.0
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

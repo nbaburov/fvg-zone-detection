@@ -10,16 +10,21 @@ Individual semester project, Fontys ICT 3rd year. Deadlines through 2026-06-20.
 
 | Component | State |
 |-----------|-------|
-| Data pipeline (Alpaca → H1 → splits) | ✅ |
+| Data pipeline (Alpaca → H1 → splits) | ✅ SPY-only |
+| Multi-symbol data pipeline (SPY+QQQ+IWM+DIA) | ✅ phase-4 complete |
 | Labellers (raw `FVGLabeller`, validated `ValidFVGLabeller`) | ✅ |
 | Gold annotation set (75 rows, κ = 1.0 vs raw `FVGLabeller`, κ = 0.89 vs `ValidFVGLabeller`) | ✅ |
-| XGBoost baseline (ValidFVG) | ✅ 5-seed mean macro F1 = **0.721** ± 0.001 |
-| CNN-LSTM (ValidFVG) | ✅ 5-seed mean macro F1 = **0.614** ± 0.021 |
-| LSTM baseline (ValidFVG) | ✅ 5-seed mean macro F1 = **0.599** ± 0.025 |
+| XGBoost baseline (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.721** ± 0.001 |
+| XGBoost (ValidFVG, multi-symbol) | ✅ **0.738** [0.689, 0.779] on fixed SPY test |
+| CNN-LSTM (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.639** ± 0.013 |
+| CNN-LSTM (ValidFVG, multi-symbol) | ✅ **0.675** [0.637, 0.710] on fixed SPY test — **data-bound supported** |
+| LSTM baseline (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.595** ± 0.015 |
+| LSTM (ValidFVG, multi-symbol) | ✅ **0.640** [0.604, 0.677] on fixed SPY test |
 | Inspector tool (offline metrics + TP/SL outcome sim) | ✅ |
 | Live paper-trading harness (Alpaca paper) | ✅ implemented, not yet run live |
-| xLSTM / Transformer | planned |
-| Full rigor sprint (G1–G10, 10 gaps closed — all three models) | ✅ complete |
+| Transformer (untuned) / xLSTM (untuned) | ✅ complete, underperform (instability/underfitting) |
+| Full rigor sprint (G1–G10, all models) | ✅ complete |
+| Phase 4 — Multi-symbol expansion + bootstrap CIs | ✅ complete (09-Jun-26) |
 
 See [`docs/models-status.md`](docs/models-status.md) for full results.
 
@@ -48,12 +53,18 @@ pip install alpaca-py exchange_calendars torch pandas numpy plotly scikit-learn 
 cp .env.example .env
 # fill ALPACA_API_KEY and ALPACA_SECRET_KEY (paper account)
 
-# 4. Build the dataset (downloads ~5 GB of SPY 1-min bars on first run)
+# 4. Build the SPY-only dataset (downloads ~5 GB of SPY 1-min bars on first run)
 python -c "from src.data.pipeline import build_pipeline; build_pipeline()"
+
+# 4b. (Optional) Build multi-symbol dataset for phase-4 lever (SPY+QQQ+IWM+DIA pooled)
+python -c "from src.data.pipeline import build_multi_symbol_pipeline; build_multi_symbol_pipeline()"
 
 # 5. Train baselines
 python scripts/training/train_xgboost.py
 python scripts/training/train_lstm.py
+
+# 5b. (Optional) Evaluate multi-symbol models on fixed SPY test
+python scripts/rigor/eval_spy_test.py --experiment experiments/cnn_lstm_multisym.yaml
 
 # 6. Inspect on unseen data
 python scripts/inspect_models.py \

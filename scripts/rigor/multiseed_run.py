@@ -203,9 +203,18 @@ def _run_xgb_seed_sweep_subprocess(cfg, ts_dir: Path) -> None:
     import pandas as pd
 
     data_dir = cfg.data_dir
-    train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-    val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-    test_df = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+
+    def _sort_if_multisym(df):
+        # Restore per-symbol contiguity that the multisym pipeline wrote but parquet
+        # round-trip does not guarantee. No-op for single-symbol data (no symbol col),
+        # so the SPY-only XGB path is byte-for-byte unchanged. Mirrors _load_splits.
+        if "symbol" not in df.columns:
+            return df
+        return df.assign(_ts=df.index).sort_values(["symbol", "_ts"]).drop(columns="_ts")
+
+    train_df = _sort_if_multisym(pd.read_parquet(data_dir / "spy_h1_train.parquet"))
+    val_df = _sort_if_multisym(pd.read_parquet(data_dir / "spy_h1_val.parquet"))
+    test_df = _sort_if_multisym(pd.read_parquet(data_dir / "spy_h1_test.parquet"))
 
     X_train, y_train = extract_window_features(train_df)
     X_val, y_val = extract_window_features(val_df)

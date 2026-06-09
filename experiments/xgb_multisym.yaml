@@ -1,0 +1,23 @@
+# xgb_multisym.yaml — XGBoost multi-symbol pooled run (Phase 4, D4 cross-check).
+# HP identical to xgb_g1.yaml (G1 Optuna best, val_macro_f1 0.6908 on SPY).
+# Only change: data.data_dir points at the pooled multi-symbol splits.
+# Trains on pooled engineered features (35-feat, cross-symbol-guarded). The headline
+# SPY-only-test number comes from a post-training eval on data/processed/spy_h1_test.parquet,
+# not from this run's pooled-test output. Run:
+#   python scripts/rigor/multiseed_run.py --model xgboost --config experiments/xgb_multisym.yaml
+name: xgb_multisym_validfvg
+data:
+  labeller: fvg_valid
+  window_size: 60
+  data_dir: data/processed/multisym
+model:
+  arch: xgb
+  n_estimators: 513
+  max_depth: 4
+  learning_rate: 0.1311447837531049
+  min_child_weight: 1
+  subsample: 0.826439213403869
+  colsample_bytree: 0.7249466284356196
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  device: cpu
