@@ -4,6 +4,46 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-09] — FVG exit-strategy trade-simulation + realism guards
+
+Tests whether the FVG detector's signals are actually tradeable on unseen 2023–2025 data, using four cited SMC/ICT exit strategies with realistic execution assumptions.
+
+### Strategy layer
+
+- **`src/strategy/exits.py`** — single source of truth for trade-outcome logic. Defines `ExitConfig`, `TradeOutcome`, and `compute_exit`. Four FVG exit strategies implemented and cited: `fixed_2r` (market-order bracket, 2× risk TP), `ict_iofed` (ICT inversion-of-FVG entry, gap-midpoint TP), `ce_50pct` (50% Gann midpoint CE pullback), `tradinglab` (TradingLab gap-cover TP). Realism guards: ATR min-stop floor (default 0.3×ATR, sweepable), transaction costs (half-spread + slippage), confidence filter (skip signals below threshold), optimistic vs conservative fill mode (optimistic = assume limit fills; conservative = degrade limit-entry strategies to market-order P&L).
+- **`src/strategy/__init__.py`** — package init exposing `compute_exit`, `ExitConfig`, `TradeOutcome`.
+
+### Inspect integration
+
+- **`src/inspect/outcomes.py`** — delegates to `compute_exit`; adds after-cost, median, winsorized, and outlier metrics alongside the existing raw-R metrics.
+- **`src/inspect/report.py`** — multi-strategy × all-seeds (5-seed mean±std) tables. `--all-seeds` aggregation path.
+- **`scripts/inspect_models.py`** — new flags: `--exit-strategy`, `--all-exit-strategies`, `--realistic`, `--min-stop-atr-k`, `--min-stop-atr-k-sweep`, `--confidence-threshold`, `--confidence-sweep`, `--all-seeds`, `--fill-mode`, `--sensitivity-sweep`. Backward compatible: defaults reproduce prior behaviour byte-identical.
+
+### Results (`docs/fvg-trading-simulation.md`)
+
+Full trade-sim on unseen 2023–2025 data: 4 tickers (SPY, QQQ, IWM, DIA) × 4 model archs × 4 exit strategies × 5 seeds + sweeps. **Honest finding:** edges are thin and uncertain. Only `fixed_2r` (market-order bracket) survives a realistic fill assumption — limit-entry strategies (`ict_iofed`, `ce_50pct`, `tradinglab`) show positive R only under optimistic fill; degrading to conservative (market-order) P&L eliminates the edge. Best defensible single cell: XGBoost + `fixed_2r`, QQQ, **+18.7±2.0R (sim)**. This is exploratory analysis — not a proven profitable strategy. 573 tests pass.
+
+### Added
+- `src/strategy/__init__.py`, `src/strategy/exits.py`
+- `tests/strategy/test_fvg_exits.py`, `tests/strategy/test_realism_guards.py`, `tests/strategy/test_sim_enhancements.py`
+- `tests/inspect/test_outcomes_regression.py`
+- `docs/fvg-trading-simulation.md`
+- `data/processed/qqq_h1_test.parquet`, `data/processed/iwm_h1_test.parquet`, `data/processed/dia_h1_test.parquet` — per-symbol unseen-test slices (~200 KB each; regenerable from multisym pooled test)
+- `.nb/plan/09-Jun-26/exit-sim-realism.md`, `.nb/plan/09-Jun-26/sim-enhancements.md`
+- `.nb/research/09-Jun-26/fvg-exit-strategies.md`
+
+### Changed
+- `src/inspect/outcomes.py` — delegates to `compute_exit`; after-cost/median/winsorized/outlier metrics
+- `src/inspect/report.py` — multi-strategy + all-seeds tables
+- `scripts/inspect_models.py` — exit-strategy flags + sensitivity sweeps
+- Docs synced: `CLAUDE.md`, `README.md`, `docs/architecture.md`
+
+### Notes
+- `.nb/plan/09-Jun-26/fvg-exit-strategies.md` and `.nb/plan/09-Jun-26/multi-symbol-expansion.md` are NOT staged here — they are plan files for future work, not part of this feature.
+- `checkpoints/xlstm_multisym/` NOT staged — training in progress.
+
+---
+
 ## [2026-06-09] — inspect/paper-trade all-5-arch tooling
 
 All 5 model architectures are now inspectable and paper-tradeable. Previously only lstm, cnn_lstm, and xgboost had adapters; transformer and xlstm could be trained but not post-hoc analysed or wired into the paper-trading loop.

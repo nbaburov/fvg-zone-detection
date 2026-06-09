@@ -21,6 +21,7 @@ Individual semester project, Fontys ICT 3rd year. Deadlines through 2026-06-20.
 | LSTM baseline (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.595** ± 0.015 |
 | LSTM (ValidFVG, multi-symbol) | ✅ **0.640** [0.604, 0.677] on fixed SPY test |
 | Inspector tool (offline metrics + TP/SL outcome sim) | ✅ |
+| FVG trade-sim layer (4 exit strategies + realism guards) | ✅ complete (09-Jun-26) |
 | Live paper-trading harness (Alpaca paper) | ✅ implemented, not yet run live |
 | Transformer (untuned) / xLSTM (untuned) | ✅ complete, underperform (instability/underfitting) |
 | Full rigor sprint (G1–G10, all models) | ✅ complete |
@@ -95,6 +96,7 @@ Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades 
 | [`docs/architecture.md`](docs/architecture.md) | Code structure, folder layout, scripts table, Mermaid diagrams for components + data flow |
 | [`docs/data-model.md`](docs/data-model.md) | On-disk parquet schemas, in-memory shapes, adapter contract, live session log format |
 | [`docs/models-status.md`](docs/models-status.md) | Splits, class balance, weights, trained model configs, current test results, what's validated and what isn't |
+| [`docs/fvg-trading-simulation.md`](docs/fvg-trading-simulation.md) | FVG trade-sim results: 4 exit strategies, realism findings, 5-seed aggregation (09-Jun-26) |
 | [`docs/idea.md`](docs/idea.md) | Original project brief — SMC background, novelty argument, scope clarification |
 | [`docs/assignment.md`](docs/assignment.md) | Fontys assignment specification + deadlines |
 | [`docs/fvg-label-guide.md`](docs/fvg-label-guide.md) | Manual annotation guide for the gold set |
@@ -107,8 +109,9 @@ Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades 
 src/data/      acquisition, labelling, splitting, windowing
 src/features/  feature engineering for non-DL models
 src/models/    architectures (LSTM, CNN-LSTM, Transformer, xLSTM, XGBoost)
+src/strategy/  FVG exit strategies (fixed_2r, ict_iofed, ce_50pct, tradinglab); realism guards (ATR, costs, confidence)
 src/training/  loss, early stop, train utils
-src/inspect/   offline model inspection toolkit (all 5 model adapters, outcome simulation)
+src/inspect/   offline model inspection toolkit (all 5 model adapters, outcome simulation via src/strategy)
 src/live/      live paper-trading harness
 scripts/       CLI entry points (data/, training/, rigor/, inspect_models, paper_trade)
 notebooks/     CRISP-DM presentation notebooks

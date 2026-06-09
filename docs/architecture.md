@@ -1,6 +1,6 @@
 # Code Structure
 
-What lives where + which script does what.
+What lives where + which script does what. Trade-simulation results and realism findings in [`docs/fvg-trading-simulation.md`](fvg-trading-simulation.md).
 
 ## Folder tree
 
@@ -53,6 +53,10 @@ smc-data-challenge/
 │   │   ├── xlstm_model.py        # FVGxLSTMClassifier (sLSTM stack, v2 API vanilla backend, CPU-only, untuned)
 │   │   └── xgboost_baseline.py    # GBM hyperparameter defaults
 │   │
+│   ├── strategy/                  # FVG trade-simulation layer
+│   │   ├── exits.py               # ExitConfig + TradeOutcome + compute_exit; 4 strategies (fixed_2r, ict_iofed, ce_50pct, tradinglab); realism guards (ATR min-stop floor, costs, confidence filter, fill_mode)
+│   │   └── __init__.py
+│   │
 │   ├── training/                  # loss + optim + early stop
 │   │   ├── loss.py                # WeightedCE, FocalLoss
 │   │   ├── early_stop.py          # EMA-smoothed patience
@@ -63,7 +67,7 @@ smc-data-challenge/
 │   │   ├── registry.py            # pkg-walks adapters/ and registers (resilient: one broken adapter doesn't kill discovery)
 │   │   ├── runner.py              # multi-adapter inference over windows
 │   │   ├── stats.py               # F1, confusion, agreement
-│   │   ├── outcomes.py            # Trade-outcome simulation: bracket entry (next H1 open), generic 2R fixed-TP + gap-edge SL, walk future bars for first TP/SL touch
+│   │   ├── outcomes.py            # Trade-outcome simulation (delegates to src/strategy.compute_exit); 4 exit strategies + realism guards; summarise_trades adds after-cost metrics
 │   │   ├── viz.py                 # Plotly per-window + per-model timeline
 │   │   ├── report.py              # writes summary.md + HTML plots
 │   │   └── adapters/              # drop a file here = new model auto-discovered
@@ -305,7 +309,7 @@ sequenceDiagram
 
 | Script | Purpose | Typical command |
 |--------|---------|-----------------|
-| `inspect_models.py` | Offline model inspection on test set with TP/SL outcome simulation (all 5 models; supports per-model checkpoint override with name:path syntax) | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` or `--models lstm:path/to/checkpoint cnn_lstm transformer xlstm xgboost` |
+| `inspect_models.py` | Offline model inspection on test set with trade-sim outcome using src/strategy (all 5 models; supports per-model checkpoint override with name:path syntax; exit strategies, realism guards, sweep modes) | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` or `--all-exit-strategies --realistic --all-seeds --confidence-sweep` |
 | `paper_trade.py` | Live paper trading via Alpaca (one process per model) | `python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001` |
 
 ## Tools / external services
