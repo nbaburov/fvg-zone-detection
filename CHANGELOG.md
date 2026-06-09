@@ -4,6 +4,32 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-09] — Documentation overhaul: plain-language showcase set
+
+Restructured `docs/` into a clean, plain-language, showcase-grade documentation set. Standard applied: explain concepts, don't name-drop; define jargon on first use; no hallucinations or speculative claims; readable by non-technical and non-financial readers.
+
+### New docs
+- **`docs/overview.md`** — plain-language project overview: what the system does, why, and how it is evaluated.
+- **`docs/data.md`** — merges the former `data-model.md` and `fvg-label-guide.md` into one coherent document. Covers data acquisition, resampling, the FVG label definition (all 6 validity criteria explained in plain English), class imbalance, and the temporal split.
+- **`docs/evaluation.md`** — new document. Explains why F1 is the primary metric, the G1–G10 validation sprint (10 controlled experiments across 5 seeds each), and how results are interpreted honestly.
+- **`docs/models.md`** — replaces `models-status.md`. Includes per-model plain-language architecture descriptions, ASCII/Mermaid diagrams, numerical results table (5-seed F1 ± std), and an honest data-bound diagnosis.
+
+### Renamed
+- `docs/fvg-trading-simulation.md` → `docs/trading-simulation.md` — name no longer ties the document to a specific model; matches the broadened multi-arch scope.
+
+### Removed (content merged into new set + `reports/rigor/`)
+- `docs/idea.md` — superseded by `docs/overview.md`
+- `docs/data-model.md` — merged into `docs/data.md`
+- `docs/fvg-label-guide.md` — merged into `docs/data.md`
+- `docs/models-status.md` — merged into `docs/models.md`; raw results preserved in `reports/rigor/`
+
+### Changed
+- `README.md` — rewritten with a clean docs index pointing to the new set; corrected `build_pipeline` and training commands.
+- `CLAUDE.md` — doc-references updated to the new filenames.
+- `docs/architecture.md` — language and cross-references aligned to the new set.
+
+---
+
 ## [2026-06-09] — FVG exit-strategy trade-simulation + realism guards
 
 Tests whether the FVG detector's signals are actually tradeable on unseen 2023–2025 data, using four cited SMC/ICT exit strategies with realistic execution assumptions.

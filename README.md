@@ -1,153 +1,112 @@
-# SMC Data Challenge — FVG Auto-Detection on SPY H1
+# SMC Data Challenge — Auto-Detecting FVG Zones on Stock Charts
 
-Deep-learning system that auto-detects **Smart Money Concepts (SMC) Fair Value Gap (FVG)** zones on SPY 1-hour candlestick data. Output = zone labels + confidence scores + Plotly chart overlays. **Not price prediction.**
+An AI system that automatically spots **Fair Value Gap (FVG)** zones on hourly stock candles and labels them with a confidence score, plus interactive chart overlays. **It is not price prediction** — it finds *where* these zones are, not which way price will move.
 
-Individual semester project, Fontys ICT 3rd year. Deadlines through 2026-06-20.
+> **FVG** = a price gap left by a fast move that traders watch for price to revisit (a so-called "institutional footprint"). Smart-money traders draw these by hand; this project automates the detection and tests it rigorously.
 
-> SMC = price-action framework derived from ICT methodology. FVG = 3-candle gap pattern indicating institutional order-flow imbalance. Manual SMC traders draw these by hand; this project automates detection at scale.
+Individual semester project — Fontys ICT, Data Science & AI, 3rd year. New to the project? **Start with [`docs/overview.md`](docs/overview.md).**
 
-## Status
+## The headline finding (plain)
 
-| Component | State |
-|-----------|-------|
-| Data pipeline (Alpaca → H1 → splits) | ✅ SPY-only |
-| Multi-symbol data pipeline (SPY+QQQ+IWM+DIA) | ✅ phase-4 complete |
-| Labellers (raw `FVGLabeller`, validated `ValidFVGLabeller`) | ✅ |
-| Gold annotation set (75 rows, κ = 1.0 vs raw `FVGLabeller`, κ = 0.89 vs `ValidFVGLabeller`) | ✅ |
-| XGBoost baseline (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.721** ± 0.001 |
-| XGBoost (ValidFVG, multi-symbol) | ✅ **0.738** [0.689, 0.779] on fixed SPY test |
-| CNN-LSTM (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.639** ± 0.013 |
-| CNN-LSTM (ValidFVG, multi-symbol) | ✅ **0.675** [0.637, 0.710] on fixed SPY test — **data-bound supported** |
-| LSTM baseline (ValidFVG, SPY-only) | ✅ 5-seed mean macro F1 = **0.595** ± 0.015 |
-| LSTM (ValidFVG, multi-symbol) | ✅ **0.640** [0.604, 0.677] on fixed SPY test |
-| Inspector tool (offline metrics + TP/SL outcome sim) | ✅ |
-| FVG trade-sim layer (4 exit strategies + realism guards) | ✅ complete (09-Jun-26) |
-| Live paper-trading harness (Alpaca paper) | ✅ implemented, not yet run live |
-| Transformer (untuned) / xLSTM (untuned) | ✅ complete, underperform (instability/underfitting) |
-| Full rigor sprint (G1–G10, all models) | ✅ complete |
-| Phase 4 — Multi-symbol expansion + bootstrap CIs | ✅ complete (09-Jun-26) |
+The task is **data-hungry, not in need of a bigger model.** A simple model (gradient boosting) wins on this small dataset, and the neural networks **improve when given more data** (we proved this by pooling four tickers). The chosen deliverable is the best neural-net detector (**CNN-LSTM**, F1 0.675 on unseen data); gradient boosting (**XGBoost**, 0.738) is the mandatory control. See [`docs/models.md`](docs/models.md) for the full story and [`docs/evaluation.md`](docs/evaluation.md) for how we tested it fairly.
 
-See [`docs/models-status.md`](docs/models-status.md) for full results.
+## Docs
+
+| Doc | Read it for |
+|---|---|
+| [`docs/overview.md`](docs/overview.md) | **Start here.** What the project is, in plain words, for any reader |
+| [`docs/data.md`](docs/data.md) | Where the data comes from, how candles are labelled, the schema + splits |
+| [`docs/architecture.md`](docs/architecture.md) | The software: what lives where, how data flows (developer view) |
+| [`docs/models.md`](docs/models.md) | The five models — what each is + why, their results, diagrams, the honest diagnosis |
+| [`docs/evaluation.md`](docs/evaluation.md) | How we tested fairly: no time-leakage, multi-seed, confidence intervals, the G1–G10 validation sprint |
+| [`docs/trading-simulation.md`](docs/trading-simulation.md) | Exploratory study: would trading on these signals have made money? (honest: mostly no) |
+| [`docs/assignment.md`](docs/assignment.md) | The course brief + deadlines |
+| `CLAUDE.md` | Conventions for AI-assisted development |
+| `.nb/` | Research, plans, and build logs (provenance trail, not front-facing docs) |
 
 ## Stack
 
-| Layer | Tool |
-|-------|------|
-| Language | Python 3.12 or 3.14 |
-| Data | `alpaca-py` (Alpaca free tier, paper), `exchange_calendars`, `pandas`, `numpy`, `pyarrow` |
-| ML | `torch`, `xgboost`, `scikit-learn` |
-| Visualisation | `plotly` |
-| Testing | `pytest` |
+| Layer | Tool (what it does) |
+|---|---|
+| Language | Python 3.12 |
+| Data | `alpaca-py` (price data), `exchange_calendars` (trading-hours), `pandas`/`numpy`/`pyarrow` |
+| ML | `torch` (neural nets), `xgboost` (gradient boosting), `scikit-learn` (metrics) |
+| Charts | `plotly` |
+| Tests | `pytest` |
 
 ## Quick start
 
 ```bash
-# 1. Clone + venv
-git clone <repo>
-cd smc-data-challenge
+# 1. Clone + virtual environment
+git clone <repo> && cd smc-data-challenge
 python -m venv .venv && source .venv/bin/activate
 
 # 2. Install
-pip install alpaca-py exchange_calendars torch pandas numpy plotly scikit-learn xgboost pytest
+pip install -r requirements.txt
 
-# 3. Configure Alpaca
-cp .env.example .env
-# fill ALPACA_API_KEY and ALPACA_SECRET_KEY (paper account)
+# 3. Configure data access (free Alpaca paper account)
+cp .env.example .env        # then fill ALPACA_API_KEY + ALPACA_SECRET_KEY
 
-# 4. Build the SPY-only dataset (downloads ~5 GB of SPY 1-min bars on first run)
+# 4. Build the dataset (downloads price data, labels it, splits it)
 python -c "from src.data.pipeline import build_pipeline; build_pipeline()"
+# (Optional) pooled multi-ticker dataset (the data-bound lever):
+python -c "from src.data.pipeline import build_multi_symbol_pipeline; build_multi_symbol_pipeline(['SPY','QQQ','IWM','DIA'], start='2016-01-01')"
 
-# 4b. (Optional) Build multi-symbol dataset for phase-4 lever (SPY+QQQ+IWM+DIA pooled)
-python -c "from src.data.pipeline import build_multi_symbol_pipeline; build_multi_symbol_pipeline()"
-
-# 5. Train baselines
+# 5. Train
 python scripts/training/train_xgboost.py
 python scripts/training/train_lstm.py
+# (Optional) score multi-ticker models on the fixed SPY test set:
+python scripts/rigor/eval_spy_test.py --models cnn_lstm lstm transformer xgb
 
-# 5b. (Optional) Evaluate multi-symbol models on fixed SPY test
-python scripts/rigor/eval_spy_test.py --experiment experiments/cnn_lstm_multisym.yaml
+# 6. Inspect on unseen data (all 5 architectures), with trade-outcome simulation
+python scripts/inspect_models.py --dataset test --lookahead-bars 20 \
+    --models cnn_lstm lstm transformer xgboost
 
-# 6. Inspect on unseen data (all 5 archs: lstm, cnn_lstm, transformer, xlstm, xgboost)
-python scripts/inspect_models.py \
-    --models lstm xgboost \
-    --dataset test \
-    --start 2023-01-01 --end 2024-12-31 \
-    --lookahead-bars 20 --tp-rr 2.0
+# 6b. Compare exit strategies with realistic execution (see trading-simulation.md)
+python scripts/inspect_models.py --dataset test --all-exit-strategies --realistic --all-seeds \
+    --models cnn_lstm lstm transformer xgboost
 
-# Or with per-model checkpoint overrides (name:path syntax)
-python scripts/inspect_models.py \
-    --models lstm:checkpoints/lstm/lstm_seed42.pt cnn_lstm:checkpoints/cnn_lstm/best.pt transformer xlstm xgboost \
-    --dataset test \
-    --lookahead-bars 20
-
-# 7. (Optional) Live paper trade during market hours
-python scripts/paper_trade.py \
-    --model lstm:checkpoints/lstm/lstm_seed42.pt \
-    --session lstm-001 \
-    --dry-run
+# 7. (Optional) live paper-trade during market hours
+python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session demo --dry-run
 ```
 
-Open `reports/inspect/<timestamp>/plots/timeline_lstm.html` to see model trades on the full slice. Open `summary.md` for F1 / outcome tables.
+Results land in `reports/inspect/<timestamp>/` — open `summary.md` for the metric + outcome tables and `plots/` for the chart overlays.
 
-## Docs
-
-| Doc | Purpose |
-|-----|---------|
-| [`docs/architecture.md`](docs/architecture.md) | Code structure, folder layout, scripts table, Mermaid diagrams for components + data flow |
-| [`docs/data-model.md`](docs/data-model.md) | On-disk parquet schemas, in-memory shapes, adapter contract, live session log format |
-| [`docs/models-status.md`](docs/models-status.md) | Splits, class balance, weights, trained model configs, current test results, what's validated and what isn't |
-| [`docs/fvg-trading-simulation.md`](docs/fvg-trading-simulation.md) | FVG trade-sim results: 4 exit strategies, realism findings, 5-seed aggregation (09-Jun-26) |
-| [`docs/idea.md`](docs/idea.md) | Original project brief — SMC background, novelty argument, scope clarification |
-| [`docs/assignment.md`](docs/assignment.md) | Fontys assignment specification + deadlines |
-| [`docs/fvg-label-guide.md`](docs/fvg-label-guide.md) | Manual annotation guide for the gold set |
-| `CLAUDE.md` | Conventions for AI-assisted development (Claude Code rules) |
-| `.nb/` | Research + plan + build logs (not docs but useful context) |
-
-## Project layout (short version)
+## Project layout
 
 ```
-src/data/      acquisition, labelling, splitting, windowing
-src/features/  feature engineering for non-DL models
-src/models/    architectures (LSTM, CNN-LSTM, Transformer, xLSTM, XGBoost)
-src/strategy/  FVG exit strategies (fixed_2r, ict_iofed, ce_50pct, tradinglab); realism guards (ATR, costs, confidence)
-src/training/  loss, early stop, train utils
-src/inspect/   offline model inspection toolkit (all 5 model adapters, outcome simulation via src/strategy)
-src/live/      live paper-trading harness
-scripts/       CLI entry points (data/, training/, rigor/, inspect_models, paper_trade)
-notebooks/     CRISP-DM presentation notebooks
-tests/         pytest, mirrors src/
-docs/          this directory
+src/data/      get + label + split + window the price data (incl. multi-ticker pooling)
+src/features/  hand-engineered features for the gradient-boosting model
+src/models/    the five architectures (LSTM, CNN-LSTM, Transformer, xLSTM, XGBoost)
+src/training/  loss functions, early stopping, seeding
+src/strategy/  the FVG trade-exit rules + realism guards (single source of truth for the trade-sim)
+src/inspect/   offline analysis: run any model on unseen data, simulate trades
+src/live/      live paper-trading harness (Alpaca paper account)
+scripts/       command-line entry points (data, training, rigor/sweeps, inspect, paper-trade)
+notebooks/     the project narrative (00–07, incl. presentation decks)
+tests/         pytest suite, mirrors src/
+docs/          the docs indexed above
 ```
-
-Full tree + per-folder explanation in [`docs/architecture.md`](docs/architecture.md).
+Full per-folder explanation in [`docs/architecture.md`](docs/architecture.md).
 
 ## Testing
 
 ```bash
-pytest                         # all
-pytest tests/inspect/ -q       # inspector (34 tests)
-pytest tests/live/ -q          # live harness (47 tests)
-pytest tests/data/labels/ -q   # labeller suites (incl. anti-lookahead fixtures)
+make test                  # full suite (XGBoost tests run isolated — see CLAUDE.md)
+pytest tests/strategy/ -q  # the trade-exit logic
+pytest tests/inspect/ -q   # the inspection toolkit
 ```
 
-## Critical constraints (the non-negotiables)
+## The non-negotiables (why the results are trustworthy)
 
-- **Temporal split only.** Train 2016–2021 / val 2022 / test 2023–2025. No shuffling. Boundaries in `src/data/split.py` as `SPLIT_BOUNDARIES` dict.
-- **No lookahead.** Labels use only information available at candle close. ValidFVGLabeller places labels at N+2 (reaction candle), raw FVGLabeller at N+1. Mandatory pytest fixture enforces this.
-- **F1 on minority class is the headline metric.** Accuracy is meaningless on 75/15/10 imbalance.
-- **Weighted cross-entropy** for the DL models; sample weights for XGBoost. Inverse-frequency weights persisted to `data/processed/class_weights.json`.
-- **Live windowing = training windowing.** The live harness imports `normalise_window` and `_MAX_INTRA_WINDOW_GAP_MINUTES` directly from the training package. No duplication, no drift.
-
-## Hardware notes
-
-Targets Apple Silicon. MPS-specific gotchas (documented in `CLAUDE.md`):
-- `nn.LSTMCell` slower than CPU → use sequence-batched `nn.LSTM`
-- `nn.MultiheadAttention` + bool mask + dropout produces NaN → add `x + 0` post-attention
-- Deterministic mode = 8× slowdown → CPU for reproducibility runs
+- **No peeking into the future.** Time-ordered split only (train 2016–2021 / validate 2022 / test 2023–2025), never shuffled; labels use only information available at the candle's time. Enforced by a mandatory test.
+- **The right metric.** F1 on the rare FVG classes — *not* accuracy (97% of candles are "none", so always-say-none scores 97% but is useless).
+- **No lucky runs.** Five random seeds per model; confidence intervals via 1000-iteration bootstrap.
+- **Honest reporting.** What failed is reported (Transformer instability, xLSTM underfitting), and uncertain results are labelled "supported, not proven." See [`docs/evaluation.md`](docs/evaluation.md).
 
 ## Author
 
-Nikola Baburov — Fontys ICT, Data Science & AI, 3rd year, Semester 6.
+Nikola Baburov — Fontys ICT, Data Science & AI, Semester 6.
 
 ## Licence
 

@@ -1,6 +1,18 @@
-# Code Structure
+# Architecture
 
-What lives where + which script does what. Trade-simulation results and realism findings in [`docs/fvg-trading-simulation.md`](fvg-trading-simulation.md).
+Developer-facing guide: what lives where, why each piece exists, and how data flows end-to-end. For data-pipeline specifics see [`docs/data.md`](data.md). For model results see [`docs/models.md`](models.md). For trade-simulation findings see [`docs/trading-simulation.md`](trading-simulation.md).
+
+## Pipeline in plain language
+
+1. **Acquire** — `src/data/download.py` pulls SPY 1-minute bars from Alpaca, stores them raw. `src/data/process.py` filters to regular trading hours (09:30–15:59 ET) and resamples to hourly bars. Other symbols (QQQ, IWM, DIA) follow the same path for multi-symbol runs.
+2. **Label** — `src/data/labels/valid_fvg.py` walks the H1 bars and marks each candle with one of three classes: bullish FVG, bearish FVG, or none. Six geometric + structural criteria must all pass; the label is assigned at bar N+2 (the earliest bar where all criteria are knowable). This is the canonical training target.
+3. **Split** — `src/data/split.py` cuts the labeled dataframe by date (train 2016–2021, val 2022, test 2023–2025). No shuffle. Boundaries are written to a provenance sidecar so splits can be reproduced exactly.
+4. **Window** — `src/data/window.py` produces 60-bar sliding windows over each split. A cross-symbol leakage guard rejects any window that straddles two symbols; a session-gap helper prevents windows from spanning overnight breaks.
+5. **Features / normalize** — `src/features/window_features.py` flattens a window to a feature vector for XGBoost. `src/data/normalize.py` does per-window min-max scaling for the DL models (used both offline and live).
+6. **Train** — Scripts under `scripts/training/` call the models in `src/models/` with loss functions and early stopping from `src/training/`. Configs are loaded from experiment YAML files via `src/config/`.
+7. **Evaluate / rigor** — `src/rigor/` provides the statistical machinery: multi-seed sweeps, Optuna HP search, threshold optimisation, bootstrap CIs. Scripts under `scripts/rigor/` drive these.
+8. **Inspect** — `scripts/inspect_models.py` loads any checkpoint via `src/inspect/`, runs predictions on the test set, simulates trades through `src/strategy/exits.py`, and writes an HTML report.
+9. **Live** — `scripts/paper_trade.py` connects to Alpaca's live WebSocket, builds H1 windows in real time via `src/live/`, and routes signals through the same decision + execution layer.
 
 ## Folder tree
 
@@ -13,133 +25,171 @@ smc-data-challenge/
 │   │   ├── spy_h1_{train,val,test}.parquet  # 2016–2021/2022/2023–2025 temporal split
 │   │   ├── class_weights.json      # alias for class_weights_fvg_valid.json
 │   │   └── class_weights_fvg_valid.json
-│   ├── processed/multisym/        # multi-symbol H1 + splits + pooled class weights (phase-4)
-│   │   ├── {spy,qqq,iwm,dia}_h1.parquet    # per-symbol H1 bars with labels (2016–2021)
-│   │   ├── multisym_h1_{train,val,test}.parquet  # pooled (SPY+QQQ+IWM+DIA) temporal splits
-│   │   ├── dataset_meta.json      # split metadata + per-symbol row counts + symbols list
+│   ├── processed/multisym/        # multi-symbol H1 + splits + pooled class weights
+│   │   ├── {spy,qqq,iwm,dia}_h1.parquet    # per-symbol H1 bars with labels
+│   │   ├── multisym_h1_{train,val,test}.parquet  # pooled temporal splits
+│   │   ├── dataset_meta.json      # split metadata + per-symbol row counts
 │   │   └── class_weights_multisym.json  # pooled inverse-frequency weights
 │   └── gold_labels.csv            # human-annotated validation set
 │
 ├── src/                           # all importable code
-│   ├── data/                      # acquisition, labelling, splitting, windowing, multi-symbol pipeline
-│   │   ├── download.py            # Alpaca SDK → raw parquet; download_h1(symbol) generalised
-│   │   ├── process.py             # 1-min → H1, RTH filter, integrity checks
-│   │   ├── normalize.py           # per-window min-max (used live + offline)
-│   │   ├── split.py               # temporal split, no shuffle; SPLIT_BOUNDARIES provenance sidecar
-│   │   ├── window.py              # 60-bar sliding windows + session gap helper + cross-symbol guard
-│   │   ├── pipeline.py            # build_pipeline (SPY-only) + build_multi_symbol_pipeline orchestrators
-│   │   ├── annotate.py            # gold-set sampler + Plotly window renderer
+│   ├── data/                      # acquisition, labelling, splitting, windowing, pipeline
+│   │   ├── download.py            # pulls raw 1-min bars from Alpaca for any symbol
+│   │   ├── process.py             # 1-min → H1 via RTH filter + integrity checks
+│   │   ├── normalize.py           # per-window min-max scaling; shared by offline + live paths
+│   │   ├── split.py               # temporal split by date; writes provenance sidecar
+│   │   ├── window.py              # 60-bar sliding windows; cross-symbol leakage guard; session-gap helper
+│   │   ├── pipeline.py            # build_pipeline (SPY) + build_multi_symbol_pipeline orchestrators
+│   │   ├── annotate.py            # gold-set sampler + Plotly window renderer for human review
 │   │   └── labels/                # labeller package
-│   │       ├── base.py            # BaseLabeller ABC + LABELLERS registry
-│   │       ├── fvg.py             # FVGLabeller — raw 3-candle geometry @ N+1
-│   │       ├── valid_fvg.py       # ValidFVGLabeller — 6-criteria SMC @ N+2
-│   │       ├── bos.py             # Break-of-Structure detector (used by valid_fvg)
-│   │       └── sr.py              # Pivot S/R detector (used by valid_fvg)
+│   │       ├── base.py            # BaseLabeller ABC + LABELLERS registry (plug-in pattern)
+│   │       ├── fvg.py             # FVGLabeller — raw 3-candle geometry @ N+1 (historical baseline only)
+│   │       ├── valid_fvg.py       # ValidFVGLabeller — 6-criteria SMC FVG @ N+2 (canonical target)
+│   │       ├── bos.py             # Break-of-Structure detector (used by valid_fvg as one criterion)
+│   │       └── sr.py              # Pivot S/R detector (used by valid_fvg as one criterion)
 │   │
-│   ├── features/                  # feature engineering for non-DL
-│   │   └── window_features.py     # 60×5 window → feature vector for XGBoost
+│   ├── features/                  # feature engineering for non-DL models
+│   │   └── window_features.py     # flattens a 60×5 OHLCV window to a feature vector for XGBoost
 │   │
-│   ├── config/                    # Pydantic v2 experiment config + YAML loader
-│   │   ├── schema.py              # ExperimentConfig + nested model/train/data schemas
-│   │   ├── loader.py              # load_config() — merges _base.yaml + override YAML
-│   │   ├── registry.py            # ModelRegistry + LossRegistry (auto-discovered)
+│   ├── config/                    # experiment config — keeps training scripts free of hard-coded HP
+│   │   ├── schema.py              # Pydantic v2 ExperimentConfig with nested model/train/data schemas
+│   │   ├── loader.py              # load_config() — merges _base.yaml with override YAML
+│   │   ├── registry.py            # ModelRegistry + LossRegistry (auto-discovered at import)
 │   │   ├── _model_registrations.py # registers lstm, cnn_lstm, transformer, xlstm, xgb
 │   │   └── _loss_registrations.py  # registers weighted_ce, focal
 │   │
-│   ├── models/                    # model architectures
-│   │   ├── lstm.py                # FVGLSTMClassifier (2-layer unidir, CPU-only)
-│   │   ├── cnn_lstm.py            # FVGCNNLSTMClassifier (Conv1d → LSTM → FC, CPU-only) — carrier
-│   │   ├── transformer.py        # FVGTransformerClassifier (encoder + pooling, CPU-only, untuned)
-│   │   ├── xlstm_model.py        # FVGxLSTMClassifier (sLSTM stack, v2 API vanilla backend, CPU-only, untuned)
-│   │   └── xgboost_baseline.py    # GBM hyperparameter defaults
+│   ├── models/                    # model architectures (all CPU-safe; MPS has gradient kernel bugs)
+│   │   ├── lstm.py                # FVGLSTMClassifier — 2-layer unidirectional LSTM + FC head
+│   │   ├── cnn_lstm.py            # FVGCNNLSTMClassifier — Conv1d feature extractor → LSTM → FC (carrier, best mean F1)
+│   │   ├── transformer.py         # FVGTransformerClassifier — encoder stack + mean pooling; warmup + grad-clip required
+│   │   ├── xlstm_model.py         # FVGxLSTMClassifier — sLSTM stack; v2 vanilla backend (arm64-safe)
+│   │   └── xgboost_baseline.py    # XGBoost HP defaults; used by training scripts + inspect adapter
 │   │
-│   ├── strategy/                  # FVG trade-simulation layer
-│   │   ├── exits.py               # ExitConfig + TradeOutcome + compute_exit; 4 strategies (fixed_2r, ict_iofed, ce_50pct, tradinglab); realism guards (ATR min-stop floor, costs, confidence filter, fill_mode)
-│   │   └── __init__.py
+│   ├── strategy/                  # exit-strategy simulation — single source of truth for trade outcomes
+│   │   └── exits.py               # ExitConfig + TradeOutcome + compute_exit; 4 strategies (fixed_2r,
+│   │                              #   ict_iofed, ce_50pct, tradinglab); realism guards: ATR min-stop
+│   │                              #   floor, slippage/commission costs, confidence filter, fill_mode
 │   │
-│   ├── training/                  # loss + optim + early stop
-│   │   ├── loss.py                # WeightedCE, FocalLoss
-│   │   ├── early_stop.py          # EMA-smoothed patience
-│   │   └── train_utils.py         # seeding, device pick
+│   ├── training/                  # loss functions, early stopping, and seeding utilities
+│   │   ├── loss.py                # WeightedCrossEntropy + FocalLoss (inverse-frequency weights loaded from JSON)
+│   │   ├── early_stop.py          # EMA-smoothed patience — stops training when val F1 plateaus
+│   │   └── train_utils.py         # global seed setter + device selection
+│   │
+│   ├── rigor/                     # statistical evaluation library (used by scripts/rigor/)
+│   │   ├── seed_sweep.py          # multi-seed training loop; checkpoint-skip; arch-specific training
+│   │   │                          #   routes (Transformer gets warmup+grad-clip; xLSTM gets neither)
+│   │   ├── bootstrap_ci.py        # block bootstrap CIs; block size = window size to respect autocorrelation
+│   │   ├── threshold.py           # per-class F1-optimal threshold search via PR curves
+│   │   ├── optuna_utils.py        # Optuna objectives for LSTM + DL models; train/val only, test never touched
+│   │   ├── optuna_xgb.py          # XGBoost Optuna objective kept separate so it can be imported without torch
+│   │   │                          #   (torch import before XGBoost segfaults on macOS arm64)
+│   │   └── report_utils.py        # Markdown + HTML report helpers shared across rigor scripts
 │   │
 │   ├── inspect/                   # offline model inspection toolkit
-│   │   ├── base.py                # ModelAdapter ABC (shared with src/live)
-│   │   ├── registry.py            # pkg-walks adapters/ and registers (resilient: one broken adapter doesn't kill discovery)
-│   │   ├── runner.py              # multi-adapter inference over windows
-│   │   ├── stats.py               # F1, confusion, agreement
-│   │   ├── outcomes.py            # Trade-outcome simulation (delegates to src/strategy.compute_exit); 4 exit strategies + realism guards; summarise_trades adds after-cost metrics
-│   │   ├── viz.py                 # Plotly per-window + per-model timeline
-│   │   ├── report.py              # writes summary.md + HTML plots
-│   │   └── adapters/              # drop a file here = new model auto-discovered
+│   │   ├── base.py                # ModelAdapter ABC — shared contract for all model types
+│   │   ├── registry.py            # walks adapters/ at import; one broken adapter does not block others
+│   │   ├── runner.py              # runs one or more adapters over all test windows in a single pass
+│   │   ├── stats.py               # computes per-class F1, confusion matrix, and inter-model agreement
+│   │   ├── outcomes.py            # delegates to src/strategy.compute_exit; adds after-cost trade metrics
+│   │   ├── viz.py                 # Plotly per-window candlestick + per-model prediction timeline
+│   │   ├── report.py              # writes summary.md + HTML plots to reports/inspect/<timestamp>/
+│   │   └── adapters/              # drop a file here — registry auto-discovers it as a new model
 │   │       ├── lstm_adapter.py
 │   │       ├── cnn_lstm_adapter.py
 │   │       ├── transformer_adapter.py
 │   │       ├── xlstm_adapter.py
 │   │       ├── xgboost_adapter.py
-│   │       └── _xgb_worker.py     # subprocess for Python 3.14+ segfault workaround
+│   │       └── _xgb_worker.py     # runs XGBoost inference in a subprocess to avoid torch-fork segfault
 │   │
 │   └── live/                      # live paper-trading harness
-│       ├── stream.py              # AlpacaBarStream (WebSocket 1-min)
-│       ├── window_builder.py      # 1-min → RTH-anchored H1, emits 60-bar windows
-│       ├── decision.py            # SingleModelDecision (threshold + gap extraction)
-│       ├── execution.py           # PaperExecutor (bracket orders + safety guards)
-│       ├── slippage.py            # 1-tick overlay for honest P&L
-│       ├── logger.py              # parquet bars + sqlite trades + jsonl events
-│       └── replay.py              # deterministic session replay for debug
+│       ├── stream.py              # opens Alpaca WebSocket and emits 1-min bars
+│       ├── window_builder.py      # buffers 1-min bars, resamples to RTH-anchored H1, emits 60-bar windows
+│       ├── decision.py            # applies model threshold, extracts FVG gap bounds → TradeAction
+│       ├── execution.py           # submits bracket orders via Alpaca paper API; 6 safety guards
+│       ├── slippage.py            # adds 1-tick slippage overlay for honest P&L accounting
+│       ├── logger.py              # writes bars (parquet), trades (sqlite), events (jsonl) per session
+│       └── replay.py              # replays a logged session deterministically for debugging
 │
-├── scripts/                       # CLI entry points
-│   ├── data/                      # data utilities
-│   │   ├── annotate_gold_set.py   # interactive Plotly gold-set annotation
-│   │   ├── count_valid_fvg.py     # sparsity gate for ValidFVGLabeller tuning
-│   │   ├── depth_probe.py         # D9 gate — multi-symbol readiness verification
-│   │   └── persist_labels.py      # deprecated — exits 0 with notice (labels now in spy_h1.parquet)
-│   ├── training/                  # model training
-│   │   ├── train_lstm.py          # train + save LSTM
-│   │   ├── train_cnn_lstm.py      # train + save CNN-LSTM
-│   │   ├── train_xgboost.py       # train + save XGBoost
-│   │   └── train.py               # generic YAML-driven trainer (all models)
-│   ├── rigor/                     # rigor sprint tools (tuning, analysis, phase-4)
-│   │   ├── multiseed_run.py       # multi-seed sweep + focal ablation (YAML-driven); _sort_if_multisym guard
-│   │   ├── tune_lstm.py           # Optuna HP search for LSTM
-│   │   ├── tune_xgboost.py        # Optuna HP search for XGBoost
+├── scripts/                       # CLI entry points (not imported by src/)
+│   ├── data/                      # one-off data utilities
+│   │   ├── annotate_gold_set.py   # interactive Plotly tool for building the gold validation set
+│   │   ├── count_valid_fvg.py     # sparsity gate — prints positive rates for current ValidFVGLabeller config
+│   │   ├── depth_probe.py         # multi-symbol readiness check (D9 gate)
+│   │   └── persist_labels.py      # deprecated — exits 0 with notice (labels now embedded in spy_h1.parquet)
+│   ├── eval/                      # evaluation comparisons
+│   │   ├── dual_fvg_compare.py    # side-by-side raw-FVG vs ValidFVG report from checkpoint meta files
+│   │   └── naive_baselines.py     # majority-class and uniform-random F1 for both label sets
+│   ├── training/                  # model training entry points
+│   │   ├── train_xgboost.py       # trains XGBoost on windowed features, saves checkpoint
+│   │   ├── train_lstm.py          # trains LSTM (CPU-only), saves checkpoint
+│   │   ├── train_cnn_lstm.py      # trains CNN-LSTM (CPU-only), saves checkpoint
+│   │   └── train.py               # generic YAML-driven trainer — works for any registered model
+│   ├── rigor/                     # statistical rigour tools (tuning, sweep, analysis)
+│   │   ├── multiseed_run.py       # drives seed_sweep for any model via YAML; _sort_if_multisym guard
+│   │   ├── learning_curve.py      # val F1 vs train fraction; shells to train.py per (fraction, seed)
+│   │   ├── tune_lstm.py           # Optuna HP search for LSTM (train/val only)
+│   │   ├── tune_xgboost.py        # Optuna HP search for XGBoost (subprocess workers for arm64 safety)
 │   │   ├── tune_cnn_lstm.py       # Optuna HP search for CNN-LSTM
-│   │   ├── threshold_sweep.py     # per-class F1-optimal thresholds
-│   │   ├── threshold_multiseed.py # threshold sweep across all 5 seeds
-│   │   ├── window_sweep.py        # window size sensitivity analysis
-│   │   ├── asymmetry_analysis.py  # bull vs bear asymmetry (Gap 6)
-│   │   ├── bootstrap_ci.py        # block bootstrap confidence intervals (Gap 10, single seed)
-│   │   ├── bootstrap_ci_multiseed.py # bootstrap CI aggregated over 5 seeds
-│   │   ├── naive_baselines.py     # majority-class + uniform-random baselines
-│   │   ├── shap_xgb.py            # SHAP feature importance (Gap 5)
-│   │   ├── eval_spy_test.py       # evaluate multi-symbol models on fixed SPY test (phase-4)
-│   │   └── _workers/              # subprocess workers (Python 3.14 segfault workaround)
+│   │   ├── tune_transformer.py    # Optuna HP search for Transformer (warmup + grad-clip gated)
+│   │   ├── threshold_sweep.py     # per-class F1-optimal threshold tuning (single seed)
+│   │   ├── threshold_multiseed.py # threshold sweep aggregated over 5 seeds
+│   │   ├── window_sweep.py        # sensitivity analysis: val F1 vs window size
+│   │   ├── asymmetry_analysis.py  # bull vs bear FVG class asymmetry
+│   │   ├── bootstrap_ci.py        # block bootstrap CIs for a single seed's predictions
+│   │   ├── bootstrap_ci_multiseed.py # block bootstrap CIs aggregated over all 5 seeds
+│   │   ├── shap_xgb.py            # SHAP feature importance for XGBoost checkpoint
+│   │   ├── eval_spy_test.py       # scores multi-symbol checkpoints on the fixed SPY-only test set
+│   │   ├── run_dl_diagnosis_pipeline.sh   # orchestrates the full DL ladder + learning-curve runs
+│   │   ├── transformer_fairshot_pipeline.sh  # tuned-Transformer fair-shot: sweep + 5-seed + collapse probe
+│   │   └── _workers/              # subprocess workers — isolate XGBoost from torch to prevent arm64 segfault
 │   │       ├── _xgb_sweep_worker.py
 │   │       ├── _xgb_tune_worker.py
 │   │       └── _shap_worker.py
-│   ├── inspect_models.py          # offline inspector CLI
-│   └── paper_trade.py             # live paper trader CLI
+│   ├── inspect_models.py          # offline inspector CLI: loads checkpoints, runs stats + trade-sim, writes report
+│   └── paper_trade.py             # live paper trader: one process per model, connects to Alpaca WS
 │
-├── notebooks/                     # CRISP-DM presentation notebooks
+├── notebooks/                     # CRISP-DM presentation notebooks (read-only reference)
+│   ├── 00-introduction.ipynb
 │   ├── 01-data-understanding.ipynb
-│   └── 02-gold-annotation.ipynb
+│   ├── 02-gold-annotation.ipynb
+│   ├── 03-baselines.ipynb
+│   ├── 04-status-update-1.ipynb   # + .html rendered export
+│   ├── 05-presentation.ipynb      # + .slides.html
+│   ├── 06-status-update-2.ipynb   # + .html rendered export
+│   └── 07-status-update-2-presentation.ipynb  # + .slides.html
 │
-├── tests/                         # pytest — mirrors src/ layout
-│   ├── data/                      # pipeline, labels, windowing
+├── tests/                         # pytest — mirrors src/ layout (365 tests total)
+│   ├── data/                      # pipeline, labels, windowing, lookahead assertion fixture
+│   ├── models/                    # per-arch forward-pass smoke tests
+│   ├── training/                  # loss, early stop, seeding
+│   ├── config/                    # schema validation, registry, loader
+│   ├── rigor/                     # seed_sweep, bootstrap, threshold
 │   ├── inspect/                   # adapter, registry, runner, stats
-│   └── live/                      # stream, window builder, decision, executor
+│   └── live/                      # stream, window_builder, decision, executor
 │
 ├── checkpoints/                   # trained weights (gitignored)
-│   ├── lstm/lstm_seed42.pt
-│   └── xgboost/xgb_seed42.ubj
+│   ├── lstm/           # lstm_seed{N}.pt + .meta.json
+│   ├── cnn_lstm/       # cnn_lstm_seed{N}.pt + .meta.json
+│   ├── transformer/    # transformer_seed{N}.pt + .meta.json
+│   ├── xlstm/          # xlstm_seed{N}.pt + .meta.json  (empty if untuned run skipped)
+│   └── xgboost/        # xgb_seed{N}.ubj + .meta.json
 │
 ├── logs/                          # paper-trading session logs (gitignored)
 │   └── paper/<session-id>/{bars.parquet, events.jsonl, trades.sqlite}
 │
-├── reports/                       # inspector HTML output (gitignored)
-│   └── inspect/<timestamp>/{summary.md, plots/}
+├── reports/                       # inspector HTML output + rigor artifacts (gitignored)
+│   ├── inspect/<timestamp>/{summary.md, plots/}
+│   └── rigor/<date>/<topic>.{md,json}
 │
-├── docs/                          # this directory
-├── .nb/                     # research/plan/build logs
+├── docs/                          # project documentation
+│   ├── overview.md                # plain-language project overview
+│   ├── architecture.md            # this file
+│   ├── data.md              # data pipeline, labelling, splits in detail
+│   ├── models.md           # per-model cards + current benchmark results
+│   ├── trading-simulation.md  # trade-sim methodology + realism findings
+│   └── overview.md / assignment.md    # original spec + deadlines
+│
+├── .nb/                           # research / plan / build logs
 └── CLAUDE.md                      # project rules for AI assistance
 ```
 
@@ -150,7 +200,7 @@ flowchart LR
     subgraph DATA["src/data/"]
         DL[download.py]
         PR[process.py]
-        LB["labels/<br/>FVG, ValidFVG, BOS, SR"]
+        LB["labels/\nFVG · ValidFVG · BOS · SR"]
         SP[split.py]
         WD[window.py]
         NM[normalize.py]
@@ -164,12 +214,26 @@ flowchart LR
     subgraph MOD["src/models/"]
         LS[lstm.py]
         CL[cnn_lstm.py]
+        TF[transformer.py]
+        XL[xlstm_model.py]
         XB[xgboost_baseline.py]
     end
 
     subgraph TR["src/training/"]
         LO[loss.py]
         ES[early_stop.py]
+        TU[train_utils.py]
+    end
+
+    subgraph RIG["src/rigor/"]
+        SS[seed_sweep.py]
+        BC[bootstrap_ci.py]
+        TH[threshold.py]
+        OP[optuna_utils.py]
+    end
+
+    subgraph STR["src/strategy/"]
+        EX[exits.py]
     end
 
     subgraph INS["src/inspect/"]
@@ -179,37 +243,32 @@ flowchart LR
         ST[stats.py]
         OC[outcomes.py]
         VZ[viz.py]
-        AD["adapters/<br/>lstm + cnn_lstm + transformer + xlstm + xgboost"]
+        AD["adapters/\nlstm · cnn_lstm · transformer · xlstm · xgboost"]
     end
 
     subgraph LIV["src/live/"]
         SM[stream.py]
         WB[window_builder.py]
         DC[decision.py]
-        EX[execution.py]
+        EXL[execution.py]
         LG[logger.py]
-        RP[replay.py]
     end
 
     DL --> PR --> LB --> SP --> WD --> PL
     NM --> WD
     NM --> WB
-    WD --> WF
-    WF --> XB
-    WD --> LS
-    LO --> LS
-    LO --> XB
-    ES --> LS
-    BA --> AD
-    AD --> RN
-    RN --> ST --> VZ
-    OC --> VZ
+    WD --> WF --> XB
+    WD --> LS & CL & TF & XL
+    LO & ES --> LS & CL & TF & XL
+    SS --> LS & CL & TF & XL & XB
+    BC & TH & OP --> SS
+    BA --> AD --> RN --> ST --> VZ
+    EX --> OC --> VZ
     BA --> DC
-    SM --> WB --> DC --> EX --> LG
-    LG --> RP
+    SM --> WB --> DC --> EXL --> LG
 ```
 
-## Offline data flow (training + inspection)
+## Offline data flow
 
 ```mermaid
 sequenceDiagram
@@ -223,22 +282,22 @@ sequenceDiagram
     participant CK as checkpoints/
     participant IN as inspector
 
-    U->>DL: download_spy_h1()
+    U->>DL: download_h1(symbol)
     DL-->>U: data/raw/spy_minute.parquet
     U->>PR: 1-min → H1 (RTH-anchored)
     PR-->>U: data/processed/spy_h1.parquet
-    U->>LB: label(df)  [FVG or ValidFVG]
-    LB-->>U: raw_label + encoded label
+    U->>LB: ValidFVGLabeller.label(df)
+    LB-->>U: fvg_valid column
     U->>SP: temporal_split (no shuffle)
     SP-->>U: train / val / test parquets
     U->>WD: 60-bar sliding windows
     WD-->>TR: (N, 60, 5) + labels
-    TR-->>CK: lstm.pt / xgb.ubj
-    CK-->>IN: load via adapter
-    IN-->>IN: predict + outcome sim + plots
+    TR-->>CK: seed{N}.pt / seed{N}.ubj + .meta.json
+    CK-->>IN: loaded via adapter
+    IN-->>IN: predict → stats → outcome sim (strategy/) → plots
 ```
 
-## Live data flow (paper trading)
+## Live data flow
 
 ```mermaid
 sequenceDiagram
@@ -250,86 +309,109 @@ sequenceDiagram
     participant LG as logger.py
     participant ALP2 as Alpaca paper
 
-    Note over WB: REST gap-fill on startup<br/>(60-bar warmup)
+    Note over WB: REST gap-fill on startup (60-bar warmup)
     ALP-->>ST: 1-min SPY bar
     ST->>WB: bar
-    WB->>WB: buffer + resample H1<br/>(closed='left' label='left' offset='30min')
-    Note over WB: emit on each H1 close
+    WB->>WB: buffer + resample H1\n(closed='left' label='left' offset='30min')
+    Note over WB: emits on each H1 close
     WB->>DC: WindowEvent (60, 5)
-    DC->>DC: adapter.predict_proba<br/>+ threshold gate<br/>+ gap extraction
+    DC->>DC: adapter.predict_proba\n+ threshold gate\n+ gap extraction
     DC->>EX: TradeAction (entry, SL, TP)
-    EX->>EX: 6 safety guards<br/>(DD, blackout, sizing, ...)
+    EX->>EX: 6 safety guards\n(drawdown, blackout, sizing, ...)
     EX->>ALP2: bracket order
     ALP2-->>EX: fills
     EX->>LG: order + fills + equity
     LG->>LG: parquet + sqlite + jsonl
 ```
 
-## Scripts — what each does
+## Key engineering decisions
+
+**Temporal split only** — the dataset is a time series. Shuffling would let future bars leak into training. Boundaries (2021/2022/2025) are fixed in `src/data/split.py` and written to a provenance sidecar so they cannot drift between runs.
+
+**CPU-only training** — PyTorch MPS (Apple Silicon GPU) has a gradient kernel bug that silently corrupts LSTM/CNN-LSTM backward passes on torch 2.x. All experiment YAMLs set `device: cpu`. See `.nb/research/12-May-26/mps-gpu-fix.md`.
+
+**XGBoost subprocess isolation** — importing torch before XGBoost in the same process segfaults on macOS arm64 after Python 3.11. Tuning and SHAP workers run in subprocesses that import XGBoost without ever loading torch. The XGBoost test file is also run in a separate pytest invocation for the same reason.
+
+**Single-source exit logic** — `src/strategy/exits.py` is the only place that computes trade outcomes. `src/inspect/outcomes.py` (offline) and `src/live/execution.py` (live) both delegate to it. This prevents the offline and live P&L calculations from diverging.
+
+**Cross-symbol leakage guard** — `src/data/window.py` rejects any 60-bar window that contains bars from more than one symbol. This matters in multi-symbol pooled datasets where symbol transitions can appear mid-sequence after sorting by timestamp.
+
+**No lookahead in labels** — `ValidFVGLabeller` assigns its label at bar N+2, the earliest bar where all six criteria (including partial fill check) are knowable. A mandatory pytest fixture asserts this on every labeller in the registry.
+
+## Scripts reference
 
 ### Data utilities (`scripts/data/`)
 
-| Script | Purpose | Typical command |
-|--------|---------|-----------------|
-| `persist_labels.py` | **Deprecated** — labels are now embedded in `spy_h1.parquet` via pipeline. Script exits 0 with a notice. | — |
-| `count_valid_fvg.py` | Sparsity gate — count positives produced by current `ValidFVGLabeller` config | `python scripts/data/count_valid_fvg.py` |
-| `annotate_gold_set.py` | Interactive Plotly annotation of gold validation set | `python scripts/data/annotate_gold_set.py` |
+| Script | What it does |
+|--------|--------------|
+| `annotate_gold_set.py` | Interactive Plotly tool; analyst marks each window as TP/FP/FN to build `gold_labels.csv` |
+| `count_valid_fvg.py` | Prints positive-rate breakdown for the current `ValidFVGLabeller` config — used as a sparsity gate before training |
+| `depth_probe.py` | Multi-symbol readiness check: verifies all symbols have enough history before a pooled-pipeline run |
+| `persist_labels.py` | Deprecated — exits 0 with a notice (labels are now embedded in `spy_h1.parquet` by `pipeline.py`) |
+
+### Evaluation (`scripts/eval/`)
+
+| Script | What it does |
+|--------|--------------|
+| `dual_fvg_compare.py` | Produces a side-by-side comparison report from raw-FVG vs ValidFVG checkpoint meta files |
+| `naive_baselines.py` | Computes majority-class and uniform-random F1 for both label sets — sets the floor for model comparisons |
 
 ### Training (`scripts/training/`)
 
-| Script | Purpose | Typical command |
-|--------|---------|-----------------|
-| `train_xgboost.py` | Train XGBoost on windowed features | `python scripts/training/train_xgboost.py` |
-| `train_lstm.py` | Train LSTM (CPU-only) | `python scripts/training/train_lstm.py` |
-| `train_cnn_lstm.py` | Train CNN-LSTM (CPU-only) | `python scripts/training/train_cnn_lstm.py` |
-| `train.py` | Generic YAML-driven trainer for any registered model | `python scripts/training/train.py --config experiments/cnn_lstm_g1.yaml` |
+| Script | What it does |
+|--------|--------------|
+| `train_xgboost.py` | Trains XGBoost on windowed features, saves `xgb_seed42.ubj` + meta |
+| `train_lstm.py` | Trains LSTM (CPU-only), saves `lstm_seed42.pt` + meta |
+| `train_cnn_lstm.py` | Trains CNN-LSTM (CPU-only), saves checkpoint + meta |
+| `train.py` | Generic YAML-driven trainer — reads an experiment config and trains whichever model is registered there |
 
 ### Rigor sprint tools (`scripts/rigor/`)
 
-| Script | Purpose | Typical command |
-|--------|---------|-----------------|
-| `multiseed_run.py` | Multi-seed training sweep (YAML-driven, any model incl. transformer/xlstm) | `python scripts/rigor/multiseed_run.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --set 'train.seeds=[0,17,42,123,2024]' --output-dir reports/rigor/<ts>/` |
-| `learning_curve.py` | Data-efficiency learning curve (val F1 vs train fraction, any arch); A2b guard asserts `--train-fraction` honoured | `python scripts/rigor/learning_curve.py --model cnn_lstm --config experiments/cnn_lstm_g1.yaml --fractions 0.2 0.4 0.6 0.8 1.0 --seeds 42 17 0` |
-| `run_dl_diagnosis_pipeline.sh` | Orchestrates the full DL ladder + learning-curve diagnosis (background, CPU) | `bash scripts/rigor/run_dl_diagnosis_pipeline.sh` |
-| `tune_lstm.py` | Optuna HP search for LSTM | `python scripts/rigor/tune_lstm.py --n-trials 50` |
-| `tune_xgboost.py` | Optuna HP search for XGBoost | `python scripts/rigor/tune_xgboost.py --n-trials 50` |
-| `tune_cnn_lstm.py` | Optuna HP search for CNN-LSTM | `python scripts/rigor/tune_cnn_lstm.py --n-trials 12 --timeout 3600` |
-| `tune_transformer.py` | Optuna HP search for Transformer (warmup+clip gated transformer-only) | `python scripts/rigor/tune_transformer.py --n-trials 50` |
-| `transformer_fairshot_pipeline.sh` | Tuned-Transformer fair-shot: sweep + 5-seed + collapse probe | `bash scripts/rigor/transformer_fairshot_pipeline.sh` |
-| `threshold_sweep.py` | Per-class F1-optimal threshold tuning (single seed) | `python scripts/rigor/threshold_sweep.py --model-path <checkpoint> --model-type lstm` |
-| `threshold_multiseed.py` | Threshold sweep aggregated over 5 seeds | `python scripts/rigor/threshold_multiseed.py --config experiments/cnn_lstm_g1.yaml` |
-| `window_sweep.py` | Window size sensitivity analysis | `python scripts/rigor/window_sweep.py --config <config.yaml> --windows 30 60 90 120` |
-| `asymmetry_analysis.py` | Bull vs Bear FVG asymmetry analysis (Gap 6) | `python scripts/rigor/asymmetry_analysis.py --pred-dir reports/rigor/<ts>/` |
-| `bootstrap_ci.py` | Block bootstrap CI (single-seed predictions) | `python scripts/rigor/bootstrap_ci.py --predictions <preds.npz>` |
-| `bootstrap_ci_multiseed.py` | Block bootstrap CI aggregated over 5 seeds | `python scripts/rigor/bootstrap_ci_multiseed.py --config experiments/cnn_lstm_g1.yaml` |
-| `naive_baselines.py` | Majority-class and uniform-random baselines | `python scripts/rigor/naive_baselines.py` |
-| `shap_xgb.py` | SHAP feature importance analysis (Gap 5) | `python scripts/rigor/shap_xgb.py --checkpoint <model.ubj>` |
+| Script | What it does |
+|--------|--------------|
+| `multiseed_run.py` | Drives `src/rigor/seed_sweep` for any model via YAML; `_sort_if_multisym` guard ensures symbol ordering |
+| `learning_curve.py` | Shells to `train.py` for each (fraction, seed) pair and plots val F1 vs training data size |
+| `tune_lstm.py` | Optuna HP search for LSTM; train+val only, test never loaded |
+| `tune_xgboost.py` | Optuna HP search for XGBoost via subprocess workers |
+| `tune_cnn_lstm.py` | Optuna HP search for CNN-LSTM |
+| `tune_transformer.py` | Optuna HP search for Transformer; warmup + grad-clip gated to this arch only |
+| `threshold_sweep.py` | Finds F1-maximising decision thresholds per class (single seed) |
+| `threshold_multiseed.py` | Threshold sweep aggregated across all 5 seeds |
+| `window_sweep.py` | Val F1 vs window size sensitivity analysis |
+| `asymmetry_analysis.py` | Bull vs bear FVG asymmetry — checks whether one direction is systematically easier |
+| `bootstrap_ci.py` | Block bootstrap confidence intervals from a single seed's predictions |
+| `bootstrap_ci_multiseed.py` | Block bootstrap CIs aggregated over all 5 seeds |
+| `shap_xgb.py` | SHAP feature importance for an XGBoost checkpoint (subprocess for arm64 safety) |
+| `eval_spy_test.py` | Scores multi-symbol checkpoints on the fixed SPY-only test set for apples-to-apples comparison |
+| `run_dl_diagnosis_pipeline.sh` | Shell orchestrator: runs the full DL ladder + learning-curve jobs in background |
+| `transformer_fairshot_pipeline.sh` | Tuned-Transformer fair-shot pipeline: HP sweep + 5-seed run + collapse probe |
 
-### Main CLIs (`scripts/`)
+### Main CLIs
 
-| Script | Purpose | Typical command |
-|--------|---------|-----------------|
-| `inspect_models.py` | Offline model inspection on test set with trade-sim outcome using src/strategy (all 5 models; supports per-model checkpoint override with name:path syntax; exit strategies, realism guards, sweep modes) | `python scripts/inspect_models.py --models lstm xgboost --lookahead-bars 20` or `--all-exit-strategies --realistic --all-seeds --confidence-sweep` |
-| `paper_trade.py` | Live paper trading via Alpaca (one process per model) | `python scripts/paper_trade.py --model lstm:checkpoints/lstm/lstm_seed42.pt --session lstm-001` |
+| Script | What it does |
+|--------|--------------|
+| `scripts/inspect_models.py` | Loads one or more checkpoints, runs test-set inference, simulates exits via `src/strategy`, writes HTML report. Supports `name:path` checkpoint syntax, `--all-exit-strategies`, `--realistic`, `--all-seeds`, `--confidence-sweep`. |
+| `scripts/paper_trade.py` | Connects to Alpaca WebSocket, builds H1 windows in real time, and paper-trades via bracket orders. Run one process per model. |
 
-## Tools / external services
+## Tools and external services
 
 | Tool | Where used | Purpose |
 |------|------------|---------|
 | `alpaca-py` | `src/data/download.py`, `src/live/stream.py`, `src/live/execution.py` | Historical 1-min bars + live WebSocket + paper bracket orders |
-| `exchange_calendars` | `src/data/process.py`, `src/live/window_builder.py` | NYSE schedule, half-day + holiday detection |
-| `torch` | `src/models/lstm.py`, `src/models/cnn_lstm.py`, `src/inspect/adapters/lstm_adapter.py`, `src/inspect/adapters/cnn_lstm_adapter.py` | LSTM + CNN-LSTM training + inference |
-| `xgboost` | `src/models/xgboost_baseline.py`, `src/inspect/adapters/_xgb_worker.py` | Gradient boosting baseline |
-| `plotly` | `src/data/annotate.py`, `src/inspect/viz.py` | Candlestick visualisation |
-| `sklearn` | `src/inspect/stats.py`, `scripts/training/train_xgboost.py` | F1, confusion, train utils |
-| `pytest` | `tests/` | All unit + integration tests |
+| `exchange_calendars` | `src/data/process.py`, `src/live/window_builder.py` | NYSE schedule — half-day and holiday detection |
+| `torch` | `src/models/{lstm,cnn_lstm,transformer,xlstm_model}.py`, matching adapters | DL model training and inference (CPU-only) |
+| `xgboost` | `src/models/xgboost_baseline.py`, `src/inspect/adapters/_xgb_worker.py` | Gradient boosting baseline and inference |
+| `optuna` | `src/rigor/optuna_utils.py`, `src/rigor/optuna_xgb.py` | Hyperparameter search |
+| `plotly` | `src/data/annotate.py`, `src/inspect/viz.py` | Candlestick charts and prediction overlays |
+| `sklearn` | `src/inspect/stats.py`, training scripts | F1, confusion matrix, PR curves |
+| `pytest` | `tests/` | Unit and integration tests |
 
 ## Where artifacts land
 
 | Artifact | Path |
 |----------|------|
-| Trained weights | `checkpoints/<model>/<name>.{pt,ubj}` + matching `.meta.json` |
+| Trained weights | `checkpoints/<model>/seed{N}.{pt,ubj}` + matching `.meta.json` |
 | Inspector report | `reports/inspect/<timestamp>/summary.md` + `plots/*.html` |
+| Rigor outputs | `reports/rigor/<date>/<topic>.{md,json}` |
 | Live session log | `logs/paper/<session-id>/{bars.parquet, events.jsonl, trades.sqlite}` |
 | Research / plans / build logs | `.nb/{research,plan,build}/<date>/<topic>.md` |
-| Docs | `docs/` (this directory) |

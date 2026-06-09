@@ -1,4 +1,4 @@
-# FVG Trading Simulation — The Rundown
+# FVG Trading Simulation
 
 **Date:** 09-Jun-26 · **Data:** unseen 2023–2025, 4 tickers (SPY, QQQ, IWM, DIA) · **Models:** CNN-LSTM, LSTM, Transformer, XGBoost
 
@@ -25,10 +25,10 @@ A trained AI that flags FVG zones (bullish / bearish / none) on hourly candles, 
 
 | Strategy | Enters | Stop | Target | Source |
 |---|---|---|---|---|
-| **fixed_2r** | buy now (market) | gap edge | fixed 2× risk | simple baseline |
-| **ict_iofed** | wait for return (limit) | far gap side (wide) | swing high | ICT |
-| **ce_50pct** | wait, gap midpoint (limit) | far side (wide) | swing high | ICT 50% |
-| **tradinglab** | wait for return (limit) | impulse candle (tight) | swing high | TradingLab |
+| **fixed_2r** | buy now (market) | gap edge | fixed 2× risk | simple baseline (no external ruleset) |
+| **ict_iofed** | wait for return (limit) | far gap side (wide) | swing high | ICT "IOFED" entry rule -- a retail trading framework's wait-for-return variant |
+| **ce_50pct** | wait, gap midpoint (limit) | far side (wide) | swing high | ICT 50% -- same framework, enters at the midpoint ("CE") of the gap |
+| **tradinglab** | wait for return (limit) | impulse candle (tight) | swing high | TradingLab variant -- tighter stop placed at the impulse candle that created the gap |
 
 3 of the 4 use **limit orders** ("wait for price to come back") — that only pays off *if price actually returns and fills you*. Hold that thought.
 
