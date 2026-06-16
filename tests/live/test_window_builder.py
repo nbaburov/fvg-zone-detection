@@ -221,11 +221,11 @@ class TestWarmUp:
 
 class TestCrossSessionGap:
     def test_gap_over_90_min_returns_none(self):
-        """H1 buffer with a >90 min gap produces CROSS_SESSION_GAP."""
+        """With drop_cross_session=True, a >90 min gap produces CROSS_SESSION_GAP."""
         import pandas as pd
         from src.live.window_builder import H1Bar
 
-        builder = LiveWindowBuilder()
+        builder = LiveWindowBuilder(drop_cross_session=True)
         base = pd.Timestamp("2024-01-02 09:30:00", tz="America/New_York")
         for i in range(59):
             if i == 30:
@@ -251,6 +251,29 @@ class TestCrossSessionGap:
 
         assert event.window is None
         assert event.skip_reason == "CROSS_SESSION_GAP"
+
+    def test_default_keeps_cross_session_window(self):
+        """Default (drop_cross_session=False) must KEEP overnight-spanning windows.
+
+        Matches training/inspect (runner.py drop_cross_session=False): a 60-bar H1
+        window always spans overnight gaps; dropping them yields 0 live signals.
+        """
+        import pandas as pd
+        from src.live.window_builder import H1Bar
+
+        builder = LiveWindowBuilder()  # default False
+        base = pd.Timestamp("2024-01-02 09:30:00", tz="America/New_York")
+        for i in range(60):
+            ts = base + pd.Timedelta(hours=i)  # spans multiple days → gaps
+            builder._h1_buffer.append(H1Bar(
+                timestamp=ts, open=100.0, high=101.0, low=99.0, close=100.5, volume=1000.0,
+            ))
+        last_bar = list(builder._h1_buffer)[-1]
+        event = builder._build_window_event(last_bar)
+
+        assert event.skip_reason is None
+        assert event.window is not None
+        assert event.window.shape == (60, 5)
 
 
 # ---------------------------------------------------------------------------
@@ -352,3 +375,142 @@ class TestGapFill:
         count_after = len(builder._current_1m)
 
         assert count_after >= count_before  # new bars added
+
+
+# ---------------------------------------------------------------------------
+# WS-7: Multi-TF window builder tests
+# ---------------------------------------------------------------------------
+
+
+class TestM5WindowBuilder:
+    """LiveWindowBuilder emits at M5 boundaries (every 5 minutes)."""
+
+    def test_emit_at_5m_boundary(self):
+        """Builder should emit WindowEvent when bar at next 5m boundary arrives."""
+        from src.data.timeframe import M5
+        builder = LiveWindowBuilder(timeframe=M5, window_size=60)
+        date = "2024-01-02"
+        # Feed bars for 09:30–09:34 (5 bars, one M5 bar)
+        bars = make_rth_1m_bars(date, 9, 30, count=5, base_price=100.0)
+        for bar in bars:
+            builder.on_bar(bar)
+        # Trigger close: send bar at 09:35 (next M5 boundary)
+        trigger = MinuteBar(
+            symbol="SPY",
+            timestamp=pd.Timestamp(f"{date} 09:35:00", tz="America/New_York"),
+            open=100.0, high=101.0, low=99.0, close=100.5, volume=500.0,
+        )
+        event = builder.on_bar(trigger)
+        assert event is not None
+        assert event.h1_bar.timestamp == pd.Timestamp(f"{date} 09:30:00", tz="America/New_York")
+
+    def test_no_emit_within_5m_bar(self):
+        """Bars within the same 5m window should not emit."""
+        from src.data.timeframe import M5
+        builder = LiveWindowBuilder(timeframe=M5, window_size=60)
+        bars = make_rth_1m_bars("2024-01-02", 9, 30, count=4, base_price=100.0)
+        events = [builder.on_bar(bar) for bar in bars]
+        assert all(e is None for e in events)
+
+
+class TestM15WindowBuilder:
+    """LiveWindowBuilder emits at M15 boundaries (every 15 minutes)."""
+
+    def test_emit_at_15m_boundary(self):
+        """Builder should emit WindowEvent when bar at next 15m boundary arrives."""
+        from src.data.timeframe import M15
+        builder = LiveWindowBuilder(timeframe=M15, window_size=60)
+        date = "2024-01-02"
+        bars = make_rth_1m_bars(date, 9, 30, count=15, base_price=100.0)
+        for bar in bars:
+            builder.on_bar(bar)
+        trigger = MinuteBar(
+            symbol="SPY",
+            timestamp=pd.Timestamp(f"{date} 09:45:00", tz="America/New_York"),
+            open=100.0, high=101.0, low=99.0, close=100.5, volume=500.0,
+        )
+        event = builder.on_bar(trigger)
+        assert event is not None
+        assert event.h1_bar.timestamp == pd.Timestamp(f"{date} 09:30:00", tz="America/New_York")
+
+    def test_emit_at_boundary_minutes(self):
+        """M15 boundaries are at :00, :15, :30, :45."""
+        from src.data.timeframe import M15
+        from src.live.window_builder import _bar_boundary_for
+        ts_10_00 = pd.Timestamp("2024-01-02 10:00:00", tz="America/New_York")
+        ts_10_07 = pd.Timestamp("2024-01-02 10:07:00", tz="America/New_York")
+        ts_10_15 = pd.Timestamp("2024-01-02 10:15:00", tz="America/New_York")
+        ts_10_44 = pd.Timestamp("2024-01-02 10:44:00", tz="America/New_York")
+
+        assert _bar_boundary_for(ts_10_00, M15) == ts_10_00
+        assert _bar_boundary_for(ts_10_07, M15) == ts_10_00
+        assert _bar_boundary_for(ts_10_15, M15) == ts_10_15
+        assert _bar_boundary_for(ts_10_44, M15) == pd.Timestamp("2024-01-02 10:30:00", tz="America/New_York")
+
+
+class TestBlackoutPerTF:
+    """Blackout K is TF-specific: H1→1, M15→2, M5→6."""
+
+    def test_h1_blackout_unchanged(self):
+        """H1 blackout = 1 bar each side (09:30 and 15:30 blacked out)."""
+        from src.data.timeframe import H1, blackout_bars
+        assert blackout_bars(H1) == 1
+
+    def test_m15_blackout_is_2(self):
+        """M15 blackout = 2 bars each side."""
+        from src.data.timeframe import M15, blackout_bars
+        assert blackout_bars(M15) == 2
+
+    def test_m5_blackout_is_6(self):
+        """M5 blackout = 6 bars each side."""
+        from src.data.timeframe import M5, blackout_bars
+        assert blackout_bars(M5) == 6
+
+    def test_h1_session_bar_index(self):
+        """H1: 09:30→idx 0, 10:30→idx 1, 15:30→idx 6."""
+        from src.data.timeframe import H1
+        from src.live.window_builder import _session_bar_index
+        ts_0930 = pd.Timestamp("2024-01-02 09:30:00", tz="America/New_York")
+        ts_1030 = pd.Timestamp("2024-01-02 10:30:00", tz="America/New_York")
+        ts_1530 = pd.Timestamp("2024-01-02 15:30:00", tz="America/New_York")
+        assert _session_bar_index(ts_0930, H1) == 0
+        assert _session_bar_index(ts_1030, H1) == 1
+        assert _session_bar_index(ts_1530, H1) == 6
+
+    def test_h1_blackout_matches_legacy_hours(self):
+        """H1 _is_blackout must agree with old _BLACKOUT_HOURS={9,15} for all 7 bars."""
+        from src.data.timeframe import H1
+        from src.live.execution import _is_blackout
+        h1_boundaries = [
+            pd.Timestamp(f"2024-01-02 {h:02d}:30:00", tz="America/New_York")
+            for h in [9, 10, 11, 12, 13, 14, 15]
+        ]
+        blacked = [ts for ts in h1_boundaries if _is_blackout(ts, H1)]
+        assert len(blacked) == 2
+        assert blacked[0].hour == 9
+        assert blacked[1].hour == 15
+
+
+class TestH1BuilderUnchanged:
+    """H1 default builder path must behave byte-identically to original."""
+
+    def test_default_args_are_h1(self):
+        """LiveWindowBuilder() with no args should use H1 and window_size=60."""
+        from src.data.timeframe import H1
+        builder = LiveWindowBuilder()
+        assert builder._tf == H1
+        assert builder._window_size == 60
+
+    def test_h1_boundary_function_fast_path(self):
+        """_bar_boundary_for with H1 equals _h1_boundary_for for all RTH times."""
+        from src.data.timeframe import H1
+        from src.live.window_builder import _bar_boundary_for, _h1_boundary_for
+        times = [
+            "2024-01-02 09:30:00",
+            "2024-01-02 10:15:00",
+            "2024-01-02 11:59:00",
+            "2024-01-02 15:45:00",
+        ]
+        for t in times:
+            ts = pd.Timestamp(t, tz="America/New_York")
+            assert _bar_boundary_for(ts, H1) == _h1_boundary_for(ts), f"Mismatch at {t}"

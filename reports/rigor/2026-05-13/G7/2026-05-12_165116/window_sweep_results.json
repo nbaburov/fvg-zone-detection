@@ -1,0 +1,9 @@
+[
+  {
+    "window_size": 30,
+    "val_macro_f1": 0.5571158223160714,
+    "test_macro_f1": 0.5306155332524471,
+    "n_test_windows": 5228,
+    "effective_n": 174
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "control": {
+    "mean_macro_f1": 0.5985,
+    "std_macro_f1": 0.0277,
+    "source": "G2 LSTM multiseed summary"
+  },
+  "no_dropout": {
+    "mean_macro_f1": 0.5914,
+    "std_macro_f1": 0.0103,
+    "delta_vs_control": -0.0071
+  },
+  "no_l2": {
+    "mean_macro_f1": 0.5962,
+    "std_macro_f1": 0.018,
+    "delta_vs_control": -0.0023
+  },
+  "both_off": {
+    "mean_macro_f1": 0.5882,
+    "std_macro_f1": 0.0145,
+    "delta_vs_control": -0.0103
+  },
+  "note": "All ablations use best_hp_lstm.json HPs. Control uses G2 per-seed results as reference. Regularisation helps marginally; dropout removal slightly hurts variance."
+}

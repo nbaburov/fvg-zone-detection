@@ -5,7 +5,8 @@
 # Run via: python scripts/rigor/multiseed_run.py --model cnn_lstm --config experiments/cnn_lstm_multisym.yaml
 name: cnn_lstm_multisym_validfvg
 data:
-  data_dir: data/processed/multisym
+  data_dir: data/processed
+  dataset: multisym
   labeller: fvg_valid
   window_size: 60
 model:

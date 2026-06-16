@@ -28,7 +28,7 @@ class TestLoadExperiment:
         assert cfg.train.lr == pytest.approx(5.3015e-4, rel=1e-3)
 
     def test_load_experiment_xgb_g1(self):
-        cfg = load_experiment(EXPERIMENTS / "xgb_g1.yaml")
+        cfg = load_experiment(EXPERIMENTS / "xgboost_g1.yaml")
         assert isinstance(cfg.model, XGBModelConfig)
         assert cfg.model.n_estimators == 513
         assert cfg.model.max_depth == 4

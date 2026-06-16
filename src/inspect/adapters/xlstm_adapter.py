@@ -22,10 +22,8 @@ _CTOR_PARAMS = set(inspect.signature(FVGxLSTMClassifier.__init__).parameters) - 
 class XLSTMAdapter(ModelAdapter):
     """Wraps a trained FVGxLSTMClassifier for inspection inference.
 
-    ``checkpoint_dir`` must be the PARENT of the ``xlstm/`` subdir (the adapter
-    resolves ``checkpoint_dir/"xlstm"/<file>``), e.g. pass ``checkpoints/`` for
-    the seed-sweep set or ``checkpoints/xlstm_multisym/`` for a multisym set
-    that nests ``xlstm/``.
+    Bare-name default: resolves ``checkpoint_dir/"xlstm_h1_spy"/<file>``.
+    Pass an explicit ``checkpoint_path=`` to load from any path directly.
 
     Windows are expected to be NORMALISED (N, 60, 5) float32 — the same
     normalisation applied during training via ``normalise_window``.
@@ -54,13 +52,16 @@ class XLSTMAdapter(ModelAdapter):
             checkpoint_path = Path(checkpoint_path)
         else:
             checkpoint_dir = Path(checkpoint_dir)
-            checkpoint_path = checkpoint_dir / "xlstm" / checkpoint_file
+            checkpoint_path = checkpoint_dir / "xlstm_h1_spy" / checkpoint_file
         if not checkpoint_path.exists():
             raise FileNotFoundError(
                 f"xLSTM checkpoint not found: {checkpoint_path}. "
-                "Pass checkpoint_dir as the parent of the 'xlstm/' subdir "
-                "(e.g. checkpoints/ for the seed-sweep set)."
+                "Pass checkpoint_dir as the root checkpoints/ directory or "
+                "supply checkpoint_path= directly."
             )
+
+        # Resolved checkpoint path — exposed for post-load TF validation (H2).
+        self.checkpoint_path = checkpoint_path
 
         # Read HP from meta sidecar so architecture matches checkpoint
         meta_path = checkpoint_path.with_suffix(".meta.json")

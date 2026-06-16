@@ -1,0 +1,19 @@
+{
+  "best_value": 0.6440447749736888,
+  "best_params": {
+    "n_conv_layers": 2,
+    "conv_filters": 16,
+    "kernel_size": 5,
+    "use_pool": false,
+    "lstm_hidden": 32,
+    "lstm_layers": 2,
+    "dropout": 0.2216968971838151,
+    "head_dropout": 0.36237821581611895,
+    "lr": 0.0007309539835912913,
+    "weight_decay": 7.476312062252308e-06,
+    "batch_size": 16
+  },
+  "best_trial": 0,
+  "n_complete": 6,
+  "n_total": 12
+}

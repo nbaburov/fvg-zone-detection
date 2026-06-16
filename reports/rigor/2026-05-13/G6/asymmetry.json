@@ -1,0 +1,41 @@
+{
+  "per_seed": {
+    "0": {
+      "bull_f1": 0.4277,
+      "bear_f1": 0.3866,
+      "gap": 0.0412,
+      "macro_f1": 0.5934
+    },
+    "17": {
+      "bull_f1": 0.4393,
+      "bear_f1": 0.4649,
+      "gap": -0.0255,
+      "macro_f1": 0.6257
+    },
+    "42": {
+      "bull_f1": 0.4199,
+      "bear_f1": 0.3744,
+      "gap": 0.0455,
+      "macro_f1": 0.588
+    },
+    "123": {
+      "bull_f1": 0.3937,
+      "bear_f1": 0.3232,
+      "gap": 0.0705,
+      "macro_f1": 0.5603
+    },
+    "2024": {
+      "bull_f1": 0.4711,
+      "bear_f1": 0.4278,
+      "gap": 0.0433,
+      "macro_f1": 0.6254
+    }
+  },
+  "mean_bull_f1": 0.4304,
+  "std_bull_f1": 0.0253,
+  "mean_bear_f1": 0.3954,
+  "std_bear_f1": 0.0482,
+  "mean_bull_bear_gap": 0.035,
+  "systematic_asymmetry_gt05": false,
+  "note": "Bull>Bear gap consistent but not systematically >0.05 across all seeds (seed17 inverted). No strong systematic asymmetry."
+}

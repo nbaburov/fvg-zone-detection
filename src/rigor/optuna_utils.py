@@ -1,9 +1,10 @@
-"""optuna_utils.py — Optuna objectives + study runner for LSTM and XGBoost HP search.
+"""optuna_utils.py — Optuna objectives + study runner for torch models (LSTM/CNN-LSTM/Transformer).
+
+(XGBoost objective lives in optuna_xgb.py — subprocess-isolated to dodge the arm64 torch+libgomp segfault.)
 
 Design constraints:
   - LSTMObjective: uses train + val only. Test parquet NEVER loaded.
-  - XGBObjective: uses train + val only.
-  - MedianPruner: fires after each epoch (LSTM) or boosting round (XGB).
+  - MedianPruner: fires after each epoch.
   - Fixed seed=42 inside objectives so search variance is hyperparams, not seed.
   - run_study: idempotent — loads existing SQLite study and resumes.
 """
@@ -126,71 +127,6 @@ class LSTMObjective:
                 break
 
         return best_val_f1
-
-
-# ---------------------------------------------------------------------------
-# XGBoost Objective
-# ---------------------------------------------------------------------------
-
-class XGBObjective:
-    """Optuna callable for XGBoost hyperparameter search.
-
-    Uses train + val feature matrices only.
-    """
-
-    def __init__(
-        self,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
-        sample_weights: np.ndarray | None = None,
-    ) -> None:
-        self.X_train = X_train
-        self.y_train = y_train
-        self.X_val = X_val
-        self.y_val = y_val
-        self.sample_weights = sample_weights
-
-    def __call__(self, trial: optuna.Trial) -> float:
-        import xgboost as xgb
-        from sklearn.metrics import f1_score
-
-        n_estimators = trial.suggest_int("n_estimators", 100, 600)
-        max_depth = trial.suggest_categorical("max_depth", [3, 4, 5, 6])
-        learning_rate = trial.suggest_float("learning_rate", 0.01, 0.2, log=True)
-        min_child_weight = trial.suggest_int("min_child_weight", 1, 10)
-        subsample = trial.suggest_float("subsample", 0.6, 1.0)
-        colsample_bytree = trial.suggest_float("colsample_bytree", 0.6, 1.0)
-
-        clf = xgb.XGBClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            min_child_weight=min_child_weight,
-            subsample=subsample,
-            colsample_bytree=colsample_bytree,
-            objective="multi:softprob",
-            num_class=3,
-            eval_metric=["mlogloss"],
-            random_state=42,
-            n_jobs=-1,
-            tree_method="hist",
-            early_stopping_rounds=30,
-            verbosity=0,
-        )
-
-        clf.fit(
-            self.X_train,
-            self.y_train,
-            sample_weight=self.sample_weights,
-            eval_set=[(self.X_val, self.y_val)],
-            verbose=False,
-        )
-
-        y_pred = clf.predict(self.X_val)
-        macro_f1 = float(f1_score(self.y_val, y_pred, average="macro", zero_division=0.0))
-        return macro_f1
 
 
 # ---------------------------------------------------------------------------
@@ -429,7 +365,7 @@ class TransformerObjective:
 # ---------------------------------------------------------------------------
 
 def run_study(
-    objective: LSTMObjective | XGBObjective | CNNLSTMObjective | TransformerObjective,
+    objective: LSTMObjective | CNNLSTMObjective | TransformerObjective,
     n_trials: int,
     storage_url: str,
     study_name: str,

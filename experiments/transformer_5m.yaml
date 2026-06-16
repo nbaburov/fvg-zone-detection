@@ -1,0 +1,34 @@
+# transformer_5m.yaml — Transformer on 5-minute bars (WS-5 timeframe-parametric plumbing).
+# HP from transformer_g1.yaml (untuned baseline — tuned HP pending per-TF Optuna sweep).
+# Only change: data.timeframe = "5m" routes build_pipeline to spy_5m_*.parquet
+# and checkpoints to checkpoints/transformer_5m/.
+# NOTE: window_size left at 60 (H1 default). WS-7b sweep will determine the
+# optimal window for 5m bars — override with --set data.window_size=<N> at that point.
+name: transformer_5m_validfvg
+data:
+  labeller: fvg_valid
+  data_dir: data/processed
+  timeframe: "5m"
+  dataset: multisym
+  window_size: 60  # WS-7b sweep will decide — placeholder
+  stride: 9  # 5m has ~12× more bars than H1; stride=9 yields ~H1-multisym-scale window count (bars/window_size is stride-invariant, so data-bound experiment stays valid)
+model:
+  arch: transformer
+  d_model: 64
+  nhead: 4
+  num_layers: 2
+  dim_feedforward: 128
+  dropout: 0.1
+  head_dropout: 0.3
+  pool: mean
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 0.001
+  weight_decay: 0.0001
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

@@ -10,17 +10,18 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src.data.download import download_h1
+from src.data.download import download_bars, download_h1
 from src.data.labels import LABELLERS
+from src.data.labels.quality import enforce_positive_rate_gate as _enforce_positive_rate_gate
 from src.data.process import build_labelled_dataset
 from src.data.split import SPLIT_BOUNDARIES, temporal_split
+from src.data.timeframe import H1, Timeframe
 from src.data.window import SMCWindowDataset
 
 logger = logging.getLogger(__name__)
 
 # Default output directory — tests can patch this
 PROCESSED_DIR = "data/processed"
-MULTISYM_DIR = "data/processed/multisym"
 
 
 def _compute_class_weights(
@@ -50,23 +51,28 @@ def _compute_class_weights(
 
 
 def build_pipeline(
+    tf: Timeframe = H1,
     labeller_name: str = "fvg_valid",
     window_size: int = 60,
     start: str = "2018-01-01",
     end: str | None = "2025-12-31",
     use_cache: bool = True,
+    enforce_positive_rate_gate: bool = True,
 ) -> tuple[SMCWindowDataset, SMCWindowDataset, SMCWindowDataset, torch.Tensor]:
     """
     Full pipeline: download → label → split → window → return datasets + class weights.
 
+    Args:
+        tf: Timeframe for resampling. Defaults to H1 (backward-compat).
+            token="h1" reproduces the exact existing spy_h1_*.parquet filenames.
+
     Returns (train_dataset, val_dataset, test_dataset, class_weights).
     class_weights: Tensor of shape (num_classes,), dtype float32.
                    Computed on train split only.
-                   Persisted to {PROCESSED_DIR}/class_weights_{labeller_name}.json
-                   (and legacy alias {PROCESSED_DIR}/class_weights.json).
+                   Persisted to {PROCESSED_DIR}/class_weights_spy_{token}.json.
     train_dataset stride = 1.
-    val_dataset stride = 60.
-    test_dataset stride = 60.
+    val_dataset stride = window_size.
+    test_dataset stride = window_size.
     Raises: ValueError if any dataset has 0 positive-class windows.
     """
     out_dir = Path(PROCESSED_DIR)
@@ -78,32 +84,54 @@ def build_pipeline(
     labeller_cls = LABELLERS[labeller_name]
     labeller = labeller_cls()
 
-    # Step 1: Get full labelled H1 DataFrame
-    full_df = build_labelled_dataset(
-        labeller_name=labeller_name,
-        start=start,
-        end=end,
-        use_cache=use_cache,
-    )
+    # Step 1: Get full labelled DataFrame (uses build_labelled_dataset which calls download_spy_h1
+    # internally for H1; for other TFs we fall through to download_bars below via the else branch).
+    # For H1 we keep the existing build_labelled_dataset path so behaviour is byte-identical.
+    if tf.token == "h1":
+        full_df = build_labelled_dataset(
+            labeller_name=labeller_name,
+            start=start,
+            end=end,
+            use_cache=use_cache,
+        )
+    else:
+        # TF-parametric path: download + resample via download_bars, then label inline.
+        raw_df = download_bars("SPY", tf=tf, start=start, end=end, use_cache=use_cache)
+        raw_labels = labeller.label(raw_df)
+        encoded_labels = labeller.encode(raw_labels)
+        full_df = raw_df.copy()
+        full_df["raw_label"] = raw_labels
+        full_df["label"] = encoded_labels
 
-    # Persist full dataset
-    full_path = out_dir / "spy_h1.parquet"
+    # Post-label quality gate (M2): per-class FVG positive rate must sit in
+    # [0.3%, 15%]. Out-of-band → degenerate (too sparse) or lookbacks too loose.
+    if enforce_positive_rate_gate:
+        rates = _enforce_positive_rate_gate(full_df["raw_label"], context=f"SPY {tf.token}")
+        logger.info(
+            "Positive-rate gate PASSED for SPY %s: bull=%.3f%%, bear=%.3f%%, total=%.3f%%",
+            tf.token, rates["bull"] * 100, rates["bear"] * 100, rates["total"] * 100,
+        )
+
+    # Persist full dataset — filename: spy_{token}_full.parquet
+    full_path = out_dir / f"spy_{tf.token}_full.parquet"
     full_df.to_parquet(full_path)
-    logger.info("Full labelled H1 written to %s (%d rows)", full_path, len(full_df))
+    logger.info("Full labelled %s written to %s (%d rows)", tf.token.upper(), full_path, len(full_df))
 
     # Step 2: Temporal split — capture boundaries explicitly so sidecar and split always agree
     boundaries = SPLIT_BOUNDARIES
     train_df, val_df, test_df = temporal_split(full_df, boundaries=boundaries)
 
-    # Persist splits
+    # Persist splits — filenames: spy_{token}_{split}.parquet
+    # token="h1" → spy_h1_train.parquet etc (byte-identical to pre-WS-3)
     for name, df_split in [("train", train_df), ("val", val_df), ("test", test_df)]:
-        path = out_dir / f"spy_h1_{name}.parquet"
+        path = out_dir / f"spy_{tf.token}_{name}.parquet"
         df_split.to_parquet(path)
         logger.info("Split '%s' written to %s (%d rows)", name, path, len(df_split))
 
-    # Write dataset_meta sidecar — self-documents the provenance of every artifact in this dir
+    # Write dataset_meta sidecar
     meta = {
         "labeller_name": labeller_name,
+        "timeframe": tf.token,
         "window_size": window_size,
         "start": start,
         "end": end,
@@ -123,28 +151,20 @@ def build_pipeline(
     num_classes = labeller.num_classes
     class_weights = _compute_class_weights(train_df, num_classes=num_classes)
 
-    # Persist class weights — write both a labeller-suffixed file and the legacy alias.
-    # Suffixed file: class_weights_{labeller_name}.json (canonical name for new consumers).
-    # Legacy alias:  class_weights.json (backwards compat — existing checkpoint .meta.json
-    #                and training scripts that hardcode this name continue to work).
     weights_dict = {str(i): float(class_weights[i]) for i in range(num_classes)}
-    suffixed_path = out_dir / f"class_weights_{labeller_name}.json"
-    legacy_path = out_dir / "class_weights.json"
-    for weights_path in (suffixed_path, legacy_path):
-        with open(weights_path, "w") as f:
-            json.dump(weights_dict, f, indent=2)
-    logger.info(
-        "Class weights written to %s (and legacy alias %s): %s",
-        suffixed_path, legacy_path, weights_dict,
-    )
+    # Flat naming: class_weights_spy_{token}.json for all timeframes.
+    weights_path = out_dir / f"class_weights_spy_{tf.token}.json"
+    with open(weights_path, "w") as f:
+        json.dump(weights_dict, f, indent=2)
+    logger.info("Class weights written to %s: %s", weights_path, weights_dict)
 
     # Step 4: Build window datasets
-    # Note: drop_cross_session_windows=False — RTH H1 = 7 bars/day, every window spans
-    # multiple overnight gaps (~18h each) and weekends. These are expected, not exceptional.
-    # FVG patterns across overnight gaps are structurally meaningful in SMC theory.
-    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
-    val_ds = SMCWindowDataset(val_df, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False)
-    test_ds = SMCWindowDataset(test_df, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False)
+    # drop_cross_session_windows=False — gaps between sessions are expected, not exceptional.
+    # gap threshold driven by tf.max_intra_window_gap_minutes (90 for H1, 22 for M15, 8 for M5).
+    gap = tf.max_intra_window_gap_minutes
+    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
+    val_ds = SMCWindowDataset(val_df, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
+    test_ds = SMCWindowDataset(test_df, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
 
     logger.info(
         "Datasets: train=%d windows, val=%d windows, test=%d windows",
@@ -166,15 +186,22 @@ def build_pipeline(
 
 def build_multi_symbol_pipeline(
     symbols: list[str],
+    tf: Timeframe = H1,
     labeller_name: str = "fvg_valid",
     window_size: int = 60,
     start: str = "2018-01-01",
     end: str | None = "2025-12-31",
     use_cache: bool = True,
+    enforce_positive_rate_gate: bool = True,
 ) -> tuple[SMCWindowDataset, SMCWindowDataset, SMCWindowDataset, torch.Tensor]:
     """
     Multi-symbol pipeline: per-symbol download → label → split, then pool across
     symbols → class weights → window datasets.
+
+    Args:
+        symbols:  Non-empty list of ticker strings.
+        tf:       Timeframe for resampling. Defaults to H1. token="h1" reproduces
+                  existing filenames in PROCESSED_DIR.
 
     Split is performed **per symbol before any concatenation** so that temporal
     boundaries are applied independently within each symbol's time series.  A
@@ -182,13 +209,12 @@ def build_multi_symbol_pipeline(
     so that ``SMCWindowDataset`` / ``_window_generator`` can reject windows that
     span a symbol boundary.
 
-    Outputs are written to ``data/processed/multisym/`` — the SPY-only parquets
-    in ``data/processed/`` are never touched.
+    Outputs are written to ``data/processed/`` with ``multisym_`` prefix — the
+    SPY-only parquets (``spy_{tf}_{split}.parquet``) are never touched.
 
-    Output parquet filenames mirror the single-symbol pipeline
-    (``spy_h1_{train,val,test}.parquet``) so that ``multiseed_run.py`` can point
-    at the multisym directory via ``--data-dir`` / ``data.data_dir`` without any
-    naming changes.
+    Output parquet filenames use ``multisym_{tf.token}_{split}.parquet``.
+    Class weights are written as ``class_weights_multisym_{tf.token}.json``.
+    Dataset meta is written as ``multisym_dataset_meta.json``.
 
     Returns (train_dataset, val_dataset, test_dataset, class_weights).
     class_weights: Tensor shape (num_classes,), dtype float32.
@@ -204,7 +230,7 @@ def build_multi_symbol_pipeline(
     if labeller_name not in LABELLERS:
         raise KeyError(f"Unknown labeller: '{labeller_name}'. Registered: {list(LABELLERS)}")
 
-    out_dir = Path(MULTISYM_DIR)
+    out_dir = Path(PROCESSED_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     labeller_cls = LABELLERS[labeller_name]
@@ -219,8 +245,8 @@ def build_multi_symbol_pipeline(
     for symbol in symbols:
         logger.info("Processing symbol: %s", symbol)
 
-        # Step 1: Download H1 bars for this symbol
-        h1_df = download_h1(symbol=symbol, start=start, end=end, use_cache=use_cache)
+        # Step 1: Download bars for this symbol at the requested TF
+        h1_df = download_bars(symbol=symbol, tf=tf, start=start, end=end, use_cache=use_cache)
 
         # Step 2: Label
         raw_labels = labeller.label(h1_df)
@@ -228,6 +254,17 @@ def build_multi_symbol_pipeline(
         labelled_df = h1_df.copy()
         labelled_df["raw_label"] = raw_labels
         labelled_df["label"] = encoded_labels
+
+        # Post-label quality gate (M2): each symbol's per-class FVG positive
+        # rate must sit in [0.3%, 15%] at this TF.
+        if enforce_positive_rate_gate:
+            rates = _enforce_positive_rate_gate(
+                labelled_df["raw_label"], context=f"{symbol} {tf.token}"
+            )
+            logger.info(
+                "Positive-rate gate PASSED for %s %s: bull=%.3f%%, bear=%.3f%%, total=%.3f%%",
+                symbol, tf.token, rates["bull"] * 100, rates["bear"] * 100, rates["total"] * 100,
+            )
 
         # Step 3: Temporal split — per symbol, before any concatenation
         train_df, val_df, test_df = temporal_split(labelled_df, boundaries=boundaries)
@@ -288,10 +325,9 @@ def build_multi_symbol_pipeline(
         len(pooled_train), len(pooled_val), len(pooled_test),
     )
 
-    # Step 6: Persist pooled splits.  Filenames match the single-symbol pipeline
-    # so multiseed_run.py can point at this directory without source changes.
+    # Step 6: Persist pooled splits.  Flat scheme: multisym_{token}_{split}.parquet
     for split_name, df_split in [("train", pooled_train), ("val", pooled_val), ("test", pooled_test)]:
-        path = out_dir / f"spy_h1_{split_name}.parquet"
+        path = out_dir / f"multisym_{tf.token}_{split_name}.parquet"
         df_split.to_parquet(path)
         logger.info("Multisym split '%s' written to %s (%d rows)", split_name, path, len(df_split))
 
@@ -300,19 +336,16 @@ def build_multi_symbol_pipeline(
     class_weights = _compute_class_weights(pooled_train, num_classes=num_classes)
 
     weights_dict = {str(i): float(class_weights[i]) for i in range(num_classes)}
-    suffixed_path = out_dir / f"class_weights_{labeller_name}.json"
-    legacy_path = out_dir / "class_weights.json"
-    for weights_path in (suffixed_path, legacy_path):
-        with open(weights_path, "w") as f:
-            json.dump(weights_dict, f, indent=2)
-    logger.info(
-        "Multisym class weights written to %s (and alias %s): %s",
-        suffixed_path, legacy_path, weights_dict,
-    )
+    # Flat naming: class_weights_multisym_{token}.json for all timeframes.
+    weights_path = out_dir / f"class_weights_multisym_{tf.token}.json"
+    with open(weights_path, "w") as f:
+        json.dump(weights_dict, f, indent=2)
+    logger.info("Multisym class weights written to %s: %s", weights_path, weights_dict)
 
     # Step 8: Dataset meta sidecar
     meta = {
         "labeller_name": labeller_name,
+        "timeframe": tf.token,
         "window_size": window_size,
         "start": start,
         "end": end,
@@ -325,20 +358,18 @@ def build_multi_symbol_pipeline(
         },
         "per_symbol_row_counts": per_symbol_row_counts,
     }
-    meta_path = out_dir / "dataset_meta.json"
+    meta_path = out_dir / "multisym_dataset_meta.json"
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     logger.info("Multisym dataset meta sidecar written to %s", meta_path)
 
     # Step 9: Build window datasets
-    # drop_cross_session_windows=False for the same reason as the single-symbol path
-    # (RTH H1 = 7 bars/day, overnight/weekend gaps are expected, not exceptional).
-    # Cross-SYMBOL windows are a separate concern handled inside _window_generator via
-    # the `symbol` column guard — windows spanning two symbols are skipped there, so the
-    # session-gap flag is not the mechanism protecting against symbol-boundary leakage.
-    train_ds = SMCWindowDataset(pooled_train, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
-    val_ds = SMCWindowDataset(pooled_val, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False)
-    test_ds = SMCWindowDataset(pooled_test, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False)
+    # drop_cross_session_windows=False — overnight/weekend gaps are expected.
+    # Cross-SYMBOL windows handled by the symbol column guard in _window_generator.
+    gap = tf.max_intra_window_gap_minutes
+    train_ds = SMCWindowDataset(pooled_train, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
+    val_ds = SMCWindowDataset(pooled_val, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
+    test_ds = SMCWindowDataset(pooled_test, labeller, stride=window_size, window_size=window_size, drop_cross_session_windows=False, max_gap_minutes=gap)
 
     logger.info(
         "Multisym datasets: train=%d windows, val=%d windows, test=%d windows",

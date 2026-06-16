@@ -1,0 +1,37 @@
+{
+  "git_sha": "5c81660",
+  "torch_version": "2.11.0",
+  "python_version": "3.12.13",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "device": "cpu",
+  "seed": 0,
+  "timestamp": "2026-06-14T19:17:49.812360+00:00",
+  "best_epoch": 51,
+  "best_val_macro_f1": 0.6991642030934493,
+  "test_macro_f1": 0.6861615174243939,
+  "test_per_class_f1": [
+    0.9808538820727579,
+    0.5097115950559152,
+    0.5679190751445087
+  ],
+  "hyperparams": {
+    "n_conv_layers": 3,
+    "conv_filters": 32,
+    "kernel_size": 3,
+    "use_pool": false,
+    "pool_type": "max",
+    "lstm_hidden": 64,
+    "lstm_layers": 1,
+    "dropout": 0.10399577780403041,
+    "head_dropout": 0.32072060000629327,
+    "batch_size": 16,
+    "lr": 0.00010543307185574993,
+    "weight_decay": 1.9592076566280767e-06,
+    "max_epochs": 100,
+    "patience": 15
+  },
+  "loss_type": "weighted_ce",
+  "focal_gamma": null,
+  "arch": "cnn_lstm",
+  "timeframe": "15m"
+}

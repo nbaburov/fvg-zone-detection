@@ -1,10 +1,13 @@
-"""window_builder.py — RTH H1 accumulator that emits 60-bar windows.
+"""window_builder.py — RTH accumulator that emits sliding windows.
 
-Accumulates 1-min bars, resamples to RTH-anchored H1 (09:30, 10:30 ... 15:30 ET),
-and emits WindowEvent objects on each H1 close. Window content is guaranteed to be
-mathematically identical to the training resample (pd.resample closed='left',
-label='left', offset='30min'). normalise_window() is imported directly — never
-duplicated here.
+Accumulates 1-min bars, resamples to RTH-anchored bars at the requested
+timeframe (H1 default: 09:30, 10:30 ... 15:30 ET; M15: 09:30, 09:45, …;
+M5: 09:30, 09:35, …), and emits WindowEvent objects on each bar close.
+Window content is guaranteed to be mathematically identical to the training
+resample (pd.resample closed='left', label='left', offset='30min').
+normalise_window() is imported directly — never duplicated here.
+
+H1 default path behaves byte-identically to the original implementation.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from src.data.normalize import normalise_window
+from src.data.timeframe import H1, Timeframe, blackout_bars
 from src.data.window import _MAX_INTRA_WINDOW_GAP_MINUTES
 from src.live.stream import MinuteBar
 
@@ -27,13 +31,14 @@ logger = logging.getLogger(__name__)
 _RTH_START = pd.Timestamp("09:30:00").time()
 _RTH_END = pd.Timestamp("16:00:00").time()
 
-# H1 boundary minutes anchored at :30 — mirrors offset='30min' in training resample
+# H1 boundary minutes anchored at :30 — mirrors offset='30min' in training resample.
+# Kept for backward compat (execution.py / tests import this name).
 _H1_BOUNDARY_MINUTES = [30]  # minute-of-hour that marks H1 boundary start
 
 
 @dataclass
 class H1Bar:
-    """A single RTH-anchored H1 OHLCV bar."""
+    """A single RTH-anchored bar (name kept as H1Bar for backward compat)."""
 
     timestamp: pd.Timestamp  # boundary start (label='left')
     open: float
@@ -45,13 +50,14 @@ class H1Bar:
 
 @dataclass
 class WindowEvent:
-    """Emitted on each H1 close."""
+    """Emitted on each bar close."""
 
     h1_timestamp: pd.Timestamp
     h1_bar: H1Bar
-    window: Optional[np.ndarray]      # (60, 5) float32 normalised, or None
-    raw_window: Optional[np.ndarray]  # (60, 5) float64 raw OHLCV, or None
+    window: Optional[np.ndarray]      # (window_size, 5) float32 normalised, or None
+    raw_window: Optional[np.ndarray]  # (window_size, 5) float64 raw OHLCV, or None
     skip_reason: Optional[str]        # "WARMUP", "CROSS_SESSION_GAP", or None
+    session_bar_index: int = 0        # 0-based index of this bar within the RTH session
 
 
 def _is_rth(ts: pd.Timestamp) -> bool:
@@ -79,47 +85,111 @@ def _h1_boundary_for(ts: pd.Timestamp) -> pd.Timestamp:
     return ts.replace(hour=boundary_hour, minute=boundary_minute, second=0, microsecond=0)
 
 
-def _next_h1_boundary(boundary: pd.Timestamp) -> pd.Timestamp:
-    """Return the next H1 boundary after the given one (add 60 minutes)."""
-    return boundary + pd.Timedelta(hours=1)
+def _bar_boundary_for(ts: pd.Timestamp, tf: Timeframe) -> pd.Timestamp:
+    """Return the bar boundary start for *ts* given *tf*.
+
+    Uses tf.boundary_minutes — the set of minute-of-hour values at which a new
+    bar begins.  The returned timestamp is the most-recent boundary that is
+    <= ts.
+
+    For H1 (boundary_minutes=(30,)) this is identical to _h1_boundary_for.
+    For M15 (boundary_minutes=(0,15,30,45)) a bar at 10:23 returns 10:15.
+    For M5  (boundary_minutes=(0,5,10,...,55)) a bar at 10:23 returns 10:20.
+    """
+    if tf.minutes == 60:
+        # Fast path — byte-identical to the original _h1_boundary_for.
+        return _h1_boundary_for(ts)
+
+    bm = tf.boundary_minutes  # sorted tuple
+    m = ts.minute
+    # Find the largest boundary_minute <= m
+    boundary_minute = bm[0]
+    for b in bm:
+        if b <= m:
+            boundary_minute = b
+        else:
+            break
+    return ts.replace(minute=boundary_minute, second=0, microsecond=0)
 
 
-def _has_session_gap_h1(bars: list[H1Bar]) -> bool:
-    """Return True if any consecutive pair of H1 bars is > _MAX_INTRA_WINDOW_GAP_MINUTES apart."""
+def _session_bar_index(boundary: pd.Timestamp, tf: Timeframe) -> int:
+    """Return the 0-based position of *boundary* within the RTH session.
+
+    RTH starts at 09:30.  Minutes since RTH open / tf.minutes gives the index.
+    E.g. H1: 09:30→0, 10:30→1, …, 15:30→6.
+         M15: 09:30→0, 09:45→1, …, 15:30→24.
+         M5:  09:30→0, 09:35→1, …, 15:55→77.
+    """
+    rth_open = boundary.replace(hour=9, minute=30, second=0, microsecond=0)
+    delta_minutes = int((boundary - rth_open).total_seconds() / 60)
+    return delta_minutes // tf.minutes
+
+
+def _next_boundary(boundary: pd.Timestamp, tf: Timeframe) -> pd.Timestamp:
+    """Return the next bar boundary after *boundary*."""
+    return boundary + pd.Timedelta(minutes=tf.minutes)
+
+
+def _has_session_gap(bars: list[H1Bar], max_gap_minutes: int) -> bool:
+    """Return True if any consecutive pair of bars is > max_gap_minutes apart."""
     if len(bars) < 2:
         return False
     for a, b in zip(bars[:-1], bars[1:]):
         gap = (b.timestamp - a.timestamp).total_seconds() / 60
-        if gap > _MAX_INTRA_WINDOW_GAP_MINUTES:
+        if gap > max_gap_minutes:
             return True
     return False
 
 
+# Backward-compat alias used by some tests
+def _has_session_gap_h1(bars: list[H1Bar]) -> bool:
+    return _has_session_gap(bars, _MAX_INTRA_WINDOW_GAP_MINUTES)
+
+
 class LiveWindowBuilder:
-    """Accumulates 1-min bars and emits WindowEvent on each H1 close.
+    """Accumulates 1-min bars and emits WindowEvent on each bar close.
+
+    Parameters
+    ----------
+    timeframe : Timeframe
+        Bar timeframe.  Default ``H1`` — all behaviour is byte-identical to
+        the original single-TF implementation when this default is used.
+    window_size : int
+        Sliding window depth in bars.  Default 60.
+    drop_cross_session : bool
+        Whether to skip windows spanning a >max_intra_window_gap session gap.
+        Default False to match training / inspect (runner.py).
 
     Thread safety: not thread-safe. Designed for single-threaded async event loop.
     """
 
-    WINDOW_SIZE = 60
+    WINDOW_SIZE = 60  # kept for backward compat; instance uses self._window_size
 
-    def __init__(self) -> None:
-        # Buffer of accumulated H1 bars (up to WINDOW_SIZE)
-        self._h1_buffer: deque[H1Bar] = deque(maxlen=self.WINDOW_SIZE)
-        # Buffer of 1-min bars for current (open) H1
+    def __init__(
+        self,
+        timeframe: Timeframe = H1,
+        window_size: int = 60,
+        drop_cross_session: bool = False,
+    ) -> None:
+        self._tf = timeframe
+        self._window_size = window_size
+        self._drop_cross_session = drop_cross_session
+        # Buffer of accumulated bars (up to window_size)
+        self._h1_buffer: deque[H1Bar] = deque(maxlen=self._window_size)
+        # Buffer of 1-min bars for current (open) bar
         self._current_1m: list[MinuteBar] = []
-        # Timestamp of the current open H1 boundary (None if no bar received yet)
+        # Timestamp of the current open bar boundary (None if no bar received yet)
         self._current_boundary: Optional[pd.Timestamp] = None
         # Deduplicate gap_fill inserts
         self._seen_1m_timestamps: set[pd.Timestamp] = set()
 
     @property
     def h1_count(self) -> int:
-        """Number of complete H1 bars in buffer."""
+        """Number of complete bars in buffer."""
         return len(self._h1_buffer)
 
     def on_bar(self, bar: MinuteBar) -> Optional[WindowEvent]:
-        """Feed a 1-min bar. Returns WindowEvent on H1 close, else None.
+        """Feed a 1-min bar. Returns WindowEvent on bar close, else None.
 
         Parameters
         ----------
@@ -131,26 +201,25 @@ class LiveWindowBuilder:
             return None
 
         ts = bar.timestamp
-        boundary = _h1_boundary_for(ts)
+        boundary = _bar_boundary_for(ts, self._tf)
 
         if self._current_boundary is None:
             self._current_boundary = boundary
 
         if boundary == self._current_boundary:
-            # Belongs to current open H1
+            # Belongs to current open bar
             self._upsert_1m(bar)
             return None
 
         if boundary > self._current_boundary:
-            # New H1 boundary — close the current H1 and start a new one
-            event = self._close_current_h1()
+            # New boundary — close the current bar and start a new one
+            event = self._close_current_bar()
             self._current_boundary = boundary
             self._current_1m = []
             self._upsert_1m(bar)
             return event
 
-        # bar is from a boundary earlier than current (late arrival or gap_fill ordering issue)
-        # Insert into seen set but do not re-trigger H1 close
+        # bar is from an earlier boundary (late arrival or gap_fill ordering issue)
         self._upsert_1m(bar)
         return None
 
@@ -175,8 +244,8 @@ class LiveWindowBuilder:
                 return
         self._current_1m.append(bar)
 
-    def _close_current_h1(self) -> Optional[WindowEvent]:
-        """Assemble H1 bar from buffered 1-min bars, append to h1_buffer, return WindowEvent."""
+    def _close_current_bar(self) -> Optional[WindowEvent]:
+        """Assemble bar from buffered 1-min bars, append to buffer, return WindowEvent."""
         if not self._current_1m or self._current_boundary is None:
             return None
 
@@ -191,26 +260,33 @@ class LiveWindowBuilder:
         )
         self._h1_buffer.append(h1)
         logger.debug(
-            "H1 closed: %s O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f",
-            h1.timestamp, h1.open, h1.high, h1.low, h1.close, h1.volume,
+            "Bar closed [%s]: %s O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f",
+            self._tf.token, h1.timestamp, h1.open, h1.high, h1.low, h1.close, h1.volume,
         )
 
         return self._build_window_event(h1)
 
+    # Backward-compat alias used by tests
+    def _close_current_h1(self) -> Optional[WindowEvent]:
+        return self._close_current_bar()
+
     def _build_window_event(self, h1: H1Bar) -> WindowEvent:
-        """Build WindowEvent from current h1_buffer state."""
-        if len(self._h1_buffer) < self.WINDOW_SIZE:
+        """Build WindowEvent from current buffer state."""
+        idx = _session_bar_index(h1.timestamp, self._tf)
+
+        if len(self._h1_buffer) < self._window_size:
             return WindowEvent(
                 h1_timestamp=h1.timestamp,
                 h1_bar=h1,
                 window=None,
                 raw_window=None,
                 skip_reason="WARMUP",
+                session_bar_index=idx,
             )
 
         bars_list = list(self._h1_buffer)
 
-        if _has_session_gap_h1(bars_list):
+        if self._drop_cross_session and _has_session_gap(bars_list, self._tf.max_intra_window_gap_minutes):
             logger.warning(
                 "Cross-session gap detected in window ending at %s. Skipping.", h1.timestamp
             )
@@ -220,12 +296,13 @@ class LiveWindowBuilder:
                 window=None,
                 raw_window=None,
                 skip_reason="CROSS_SESSION_GAP",
+                session_bar_index=idx,
             )
 
         raw = np.array(
             [[b.open, b.high, b.low, b.close, b.volume] for b in bars_list],
             dtype=np.float64,
-        )  # (60, 5)
+        )  # (window_size, 5)
         normalised = normalise_window(raw)
 
         return WindowEvent(
@@ -234,4 +311,5 @@ class LiveWindowBuilder:
             window=normalised,
             raw_window=raw,
             skip_reason=None,
+            session_bar_index=idx,
         )

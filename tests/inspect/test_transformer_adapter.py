@@ -25,8 +25,8 @@ import torch
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _CHECKPOINT_DIR = _REPO_ROOT / "checkpoints"
-_TRANSFORMER_CKPT = _CHECKPOINT_DIR / "transformer" / "transformer_seed0.pt"
-_TRANSFORMER_META = _CHECKPOINT_DIR / "transformer" / "transformer_seed0.meta.json"
+_TRANSFORMER_CKPT = _CHECKPOINT_DIR / "transformer_h1_spy" / "transformer_seed0.pt"
+_TRANSFORMER_META = _CHECKPOINT_DIR / "transformer_h1_spy" / "transformer_seed0.meta.json"
 
 _HAS_REAL_CKPT = _TRANSFORMER_CKPT.exists()
 

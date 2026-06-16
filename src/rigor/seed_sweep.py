@@ -35,11 +35,23 @@ class SeedSweepConfig:
     # Regularisation ablation flags (G9) — affect checkpoint name to avoid cache collisions
     ablation_no_dropout: bool = False
     ablation_no_l2: bool = False
+    # Timeframe token (WS-5). "h1" = production default.
+    timeframe: str = "h1"
+    # Dataset token. Derived from data_dir at post_init if not set explicitly.
+    # "spy" → checkpoints/{arch}_{tf}_spy/; "multisym" → checkpoints/{arch}_{tf}_multisym/.
+    dataset: str = "spy"
+    # Tuned suffix flag (only cnn_lstm 5m/15m tuned runs set this).
+    tuned: bool = False
+    # Configurable training stride (WS-7 lower-TF retrain). VAL/TEST always use stride=1
+    # for unbiased, comparable evaluation. Default=1 → H1 training is byte-identical.
+    train_stride: int = 1
 
     def __post_init__(self) -> None:
         self.output_dir = Path(self.output_dir)
         self.checkpoint_dir = Path(self.checkpoint_dir)
         self.data_dir = Path(self.data_dir)
+        # dataset is set explicitly (from cfg.data.dataset) or defaults to "spy".
+        # No longer auto-derived from data_dir (data_dir is now always data/processed).
 
     @classmethod
     def from_experiment_config(
@@ -82,7 +94,22 @@ class SeedSweepConfig:
             data_dir=cfg.data.data_dir,
             ablation_no_dropout=cfg.train.ablation_no_dropout,
             ablation_no_l2=cfg.train.ablation_no_l2,
+            timeframe=cfg.data.timeframe,
+            train_stride=cfg.data.stride,
+            dataset=cfg.data.dataset,
         )
+
+
+def _ckpt_subdir(model_type: str, timeframe: str, dataset: str = "spy", tuned: bool = False) -> str:
+    """Return the checkpoint subdirectory name for *model_type*, *timeframe*, and *dataset*.
+
+    Flat scheme: ``{arch}_{tf}_{dataset}[_tuned]``
+    Examples:
+      lstm, h1, spy   → ``lstm_h1_spy``
+      cnn_lstm, 15m, multisym, tuned → ``cnn_lstm_15m_multisym_tuned``
+    """
+    from src.inspect.multisym import _dir_name
+    return _dir_name(model_type, timeframe, dataset, tuned=tuned)
 
 
 def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
@@ -97,7 +124,7 @@ def run_seed_sweep(config: SeedSweepConfig) -> pd.DataFrame:
 
     for seed in config.seeds:
         ckpt_name = _checkpoint_name(config, seed)
-        ckpt_dir = config.checkpoint_dir / config.model_type
+        ckpt_dir = config.checkpoint_dir / _ckpt_subdir(config.model_type, config.timeframe, config.dataset, config.tuned)
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
         if config.model_type in ("lstm", "cnn_lstm", "transformer", "xlstm"):
@@ -187,14 +214,16 @@ def _train_lstm(
     device = _get_device()
 
     # Load splits
-    train_df, val_df, test_df = _load_splits(config.data_dir)
+    train_df, val_df, test_df = _load_splits(config.data_dir, config.timeframe, scope=config.dataset)
     labeller = FVGLabeller()  # fvg_valid: recomputes labels from OHLCV on each split
 
-    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
-    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
-    test_ds = SMCWindowDataset(test_df, labeller, stride=1, window_size=60, drop_cross_session_windows=False)
-
     hp = config.hyperparams
+    window_size = int(hp.get("window_size", 60))  # honor swept window_size (matches cnn_lstm / torch_generic)
+
+    train_ds = SMCWindowDataset(train_df, labeller, stride=config.train_stride, window_size=window_size, drop_cross_session_windows=False)
+    val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
+    test_ds = SMCWindowDataset(test_df, labeller, stride=1, window_size=window_size, drop_cross_session_windows=False)
+
     batch_size = int(hp.get("batch_size", 32))
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
@@ -202,7 +231,7 @@ def _train_lstm(
     test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
 
     # Load class weights
-    weights = _load_class_weights(config.data_dir)
+    weights = _load_class_weights(config.data_dir, config.timeframe, scope=config.dataset)
     weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
 
     model = FVGLSTMClassifier(
@@ -270,6 +299,7 @@ def _train_lstm(
         "optuna_study": None,
         "optuna_trial_number": None,
         "threshold_config": None,
+        "timeframe": config.timeframe,
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)
@@ -301,14 +331,14 @@ def _train_cnn_lstm(
     set_seed(seed)
     device = _get_device()
 
-    train_df, val_df, test_df = _load_splits(config.data_dir)
+    train_df, val_df, test_df = _load_splits(config.data_dir, config.timeframe, scope=config.dataset)
     labeller = LABELLERS["fvg_valid"]()
 
     hp = config.hyperparams
     window_size = int(hp.get("window_size", 60))
     batch_size = int(hp.get("batch_size", 16))
 
-    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size,
+    train_ds = SMCWindowDataset(train_df, labeller, stride=config.train_stride, window_size=window_size,
                                 drop_cross_session_windows=False)
     val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size,
                               drop_cross_session_windows=False)
@@ -319,7 +349,7 @@ def _train_cnn_lstm(
     val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
 
-    weights = _load_class_weights(config.data_dir)
+    weights = _load_class_weights(config.data_dir, config.timeframe, scope=config.dataset)
     weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
 
     n_conv_layers = int(hp.get("n_conv_layers", 2))
@@ -389,6 +419,7 @@ def _train_cnn_lstm(
         "loss_type": config.loss_type,
         "focal_gamma": config.focal_gamma if config.loss_type == "focal" else None,
         "arch": "cnn_lstm",
+        "timeframe": config.timeframe,
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)
@@ -444,14 +475,14 @@ def _train_torch_generic(
     set_seed(seed)
     device = _get_device()  # CPU (forced)
 
-    train_df, val_df, test_df = _load_splits(config.data_dir)
+    train_df, val_df, test_df = _load_splits(config.data_dir, config.timeframe, scope=config.dataset)
     labeller = LABELLERS["fvg_valid"]()
 
     hp = config.hyperparams
     window_size = int(hp.get("window_size", 60))
     batch_size = int(hp.get("batch_size", 16))
 
-    train_ds = SMCWindowDataset(train_df, labeller, stride=1, window_size=window_size,
+    train_ds = SMCWindowDataset(train_df, labeller, stride=config.train_stride, window_size=window_size,
                                 drop_cross_session_windows=False)
     val_ds = SMCWindowDataset(val_df, labeller, stride=1, window_size=window_size,
                               drop_cross_session_windows=False)
@@ -462,7 +493,7 @@ def _train_torch_generic(
     val_loader = DataLoader(val_ds, batch_size=256, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=256, shuffle=False, num_workers=0)
 
-    weights = _load_class_weights(config.data_dir)
+    weights = _load_class_weights(config.data_dir, config.timeframe, scope=config.dataset)
     weights_tensor = torch.tensor(weights, dtype=torch.float32).to(device)
 
     # Model ctor args = all HP except training-loop keys. Apply dropout ablation.
@@ -579,6 +610,7 @@ def _train_torch_generic(
         "arch": arch,
         "warmup_steps": warmup_steps,
         "max_grad_norm": max_grad_norm,
+        "timeframe": config.timeframe,
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)
@@ -608,10 +640,10 @@ def _train_xgb(
 
     set_seed(seed)
 
-    train_df, val_df, test_df = _load_splits(config.data_dir)
-    weights_arr = _load_class_weights(config.data_dir)
+    train_df, val_df, test_df = _load_splits(config.data_dir, config.timeframe, scope=config.dataset)
+    weights_arr = _load_class_weights(config.data_dir, config.timeframe, scope=config.dataset)
 
-    X_train, y_train = extract_window_features(train_df)
+    X_train, y_train = extract_window_features(train_df, stride=config.train_stride)
     X_val, y_val = extract_window_features(val_df)
     X_test, y_test = extract_window_features(test_df)
 
@@ -664,6 +696,7 @@ def _train_xgb(
         "optuna_study": None,
         "optuna_trial_number": None,
         "threshold_config": None,
+        "timeframe": config.timeframe,
     }
     with meta_path.open("w") as fh:
         json.dump(meta, fh, indent=2)
@@ -686,10 +719,20 @@ def _get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def _load_splits(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    train = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-    val = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-    test = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+def _load_splits(
+    data_dir: Path,
+    timeframe: str = "h1",
+    scope: str = "spy",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load train/val/test parquets for the given timeframe token and scope.
+
+    Flat naming: ``{scope}_{token}_{split}.parquet`` written by
+    ``build_pipeline`` (scope="spy") or ``build_multi_symbol_pipeline``
+    (scope="multisym").
+    """
+    train = pd.read_parquet(data_dir / f"{scope}_{timeframe}_train.parquet")
+    val = pd.read_parquet(data_dir / f"{scope}_{timeframe}_val.parquet")
+    test = pd.read_parquet(data_dir / f"{scope}_{timeframe}_test.parquet")
     # Multi-symbol parquets must have same-symbol bars contiguous and sorted so
     # _window_generator's cross-symbol guard works correctly.  Parquet spec does
     # not guarantee row order on reload, so re-sort here using the same pattern
@@ -706,8 +749,13 @@ def _load_splits(data_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFra
     return train, val, test
 
 
-def _load_class_weights(data_dir: Path) -> list[float]:
-    weights_path = data_dir / "class_weights.json"
+def _load_class_weights(data_dir: Path, timeframe: str = "h1", scope: str = "spy") -> list[float]:
+    """Load the per-timeframe inverse-frequency class weights.
+
+    Flat naming: ``class_weights_{scope}_{token}.json`` (written by build_*_pipeline).
+    scope="spy" for single-symbol, "multisym" for pooled multi-symbol.
+    """
+    weights_path = data_dir / f"class_weights_{scope}_{timeframe}.json"
     with weights_path.open() as fh:
         data = json.load(fh)
     if isinstance(data, list):

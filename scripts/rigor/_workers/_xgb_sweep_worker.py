@@ -26,6 +26,13 @@ def main() -> None:
     parser.add_argument('--seeds', nargs='+', type=int, required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--checkpoint-dir', required=True)
+    parser.add_argument('--timeframe', default='h1',
+                        help='Timeframe token (h1|5m|15m).')
+    parser.add_argument('--data-dir', default=None,
+                        help='Directory containing class_weights_{scope}_{tf}.json. '
+                             'Defaults to ROOT/data/processed.')
+    parser.add_argument('--scope', default='spy',
+                        help='Dataset scope (spy|multisym). Determines class_weights filename.')
     args = parser.parse_args()
 
     data = np.load(args.data_npz)
@@ -38,14 +45,19 @@ def main() -> None:
 
     hp = json.loads(args.config)
 
-    weights_path = ROOT / 'data' / 'processed' / 'class_weights.json'
+    tf = args.timeframe
+    scope = args.scope
+    data_dir = Path(args.data_dir) if args.data_dir is not None else ROOT / 'data' / 'processed'
+    cw_name = f'class_weights_{scope}_{tf}.json'
+    weights_path = data_dir / cw_name
     with weights_path.open() as fh:
         cw = json.load(fh)
     w_arr = [float(cw[str(i)]) for i in range(3)]
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_dir = Path(args.checkpoint_dir) / 'xgboost'
+    ckpt_subdir = 'xgboost' if tf == 'h1' else f'xgboost_{tf}'
+    ckpt_dir = Path(args.checkpoint_dir) / ckpt_subdir
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     xgb_metrics = ['mlogloss']

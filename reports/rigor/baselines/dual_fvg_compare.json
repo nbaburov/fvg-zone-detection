@@ -1,0 +1,35 @@
+{
+  "gate_a5_passed": true,
+  "lstm_rawfvg": {
+    "test_macro_f1": 0.8752996935680578,
+    "test_bull_f1": 0.8473282442748091,
+    "test_bear_f1": 0.831013916500994,
+    "pos_rate": 0.2524253376450447
+  },
+  "lstm_validfvg": {
+    "test_macro_f1": 0.5960588901733637,
+    "test_bull_f1": 0.0,
+    "test_bear_f1": 0.0,
+    "pos_rate": 0.031006277344493058
+  },
+  "xgb_rawfvg": {
+    "test_macro_f1": 0.5889889893339001,
+    "test_bull_f1": 0.543572044866264,
+    "test_bear_f1": 0.5030978934324659,
+    "pos_rate": 0.2524253376450447
+  },
+  "xgb_validfvg": {
+    "test_macro_f1": 0.5294247261136621,
+    "test_bull_f1": 0.4329411764705882,
+    "test_bear_f1": 0.22905982905982905,
+    "pos_rate": 0.031006277344493058
+  },
+  "naive_rawfvg": {
+    "test_macro_f1": 0.2851855883313377,
+    "pos_rate": 0.2524253376450447
+  },
+  "naive_validfvg": {
+    "test_macro_f1": 0.3280842430683026,
+    "pos_rate": 0.031006277344493058
+  }
+}

@@ -12,7 +12,8 @@ name: transformer_multisym_validfvg
 data:
   labeller: fvg_valid
   window_size: 60
-  data_dir: data/processed/multisym
+  data_dir: data/processed
+  dataset: multisym
 model:
   arch: transformer
   d_model: 64

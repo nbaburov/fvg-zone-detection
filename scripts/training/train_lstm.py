@@ -90,7 +90,7 @@ def parse_args() -> argparse.Namespace:
         choices=["validfvg", "rawfvg"],
         default="validfvg",
         help=(
-            "validfvg (default): load class_weights.json, save as lstm_seed{N}.pt. "
+            "validfvg (default): load class_weights_spy_h1.json, save as lstm_seed{N}.pt. "
             "rawfvg: load class_weights_rawfvg.json from splits dir, save as lstm_seed{N}_rawfvg.pt."
         ),
     )
@@ -608,7 +608,7 @@ def main() -> None:
     if args.label == "rawfvg":
         cw_filename = "class_weights_rawfvg.json"
     else:
-        cw_filename = "class_weights.json"
+        cw_filename = "class_weights_spy_h1.json"
     cw_path = cw_dir / cw_filename
     with open(cw_path) as f:
         cw = json.load(f)
@@ -632,7 +632,7 @@ def main() -> None:
         f"_splits{args.splits}" if args.splits == "legacy" else ""
     )
     ckpt_path = out_dir / f"lstm_seed{args.seed}{label_tag}.pt"
-    log_csv_path = Path("logs") / f"lstm_seed{args.seed}{label_tag}.csv"
+    log_csv_path = Path("logs/training") / f"lstm_seed{args.seed}{label_tag}.csv"
     log_csv_path.parent.mkdir(parents=True, exist_ok=True)
     eval_log_path = Path(".nb/test-logs/11-May-26/lstm-baseline.md")
 

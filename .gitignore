@@ -1,9 +1,16 @@
-# Override global gitignore — track CLAUDE.md and .nb for this project
+# .gitignore : what this repo does NOT commit.
+#
+# Tracked on purpose: source, configs, docs, notebooks, the .nb/ provenance
+# trail, CLAUDE.md, the FROZEN model inputs (data/processed/), trained
+# checkpoints/, the gold label set, and a curated reports/ record. Everything
+# regenerable-and-heavy or purely runtime is ignored.
+
+# --- Override a global gitignore (track these despite any global rule) ---
 !CLAUDE.md
 !.nb/
 !.nb/**
 
-# Standard Python ignores
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,25 +18,55 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
-
-# Data + checkpoints + study DBs are tracked (small enough, frozen artefacts)
-# Total ~65MB across raw + processed + checkpoints — under GitHub 100MB/file limit.
-# Re-evaluate if a single file approaches 100MB (use git-lfs).
-
-# Notebook checkpoints
 .ipynb_checkpoints/
 
-# Logs
-logs/
-*.log
-
-# Test predictions & analysis artifacts (ephemeral model outputs)
-data/processed/test_predictions*.npz
-reports/
-
-# Env vars (real)
+# --- Secrets / environment ---
 .env
 .env.local
 
-# OS
+# --- OS cruft ---
 .DS_Store
+
+# --- Logs (runtime only; scripts recreate logs/{training,paper,fleet}/) ---
+logs/
+*.log
+
+# --- Raw market data (regenerable from Alpaca; ~188M of 1-min bars) ---
+# The processed model inputs in data/processed/ ARE tracked (frozen, ~38M) so
+# results reproduce without API keys or a re-download. The raw bars are not.
+data/raw/*
+!data/raw/.gitkeep
+
+# --- Ephemeral model outputs ---
+data/processed/test_predictions*.npz
+
+# --- reports/ : runtime output, ignored except a curated summaries-only record ---
+# Allowlist the canonical dirs below; bloat (html/npz/parquet/plots) is never
+# tracked. Add a new canonical dir with one `!` line.
+# See CONTRIBUTING.md and tests/rigor/test_reports_layout.py.
+reports/*
+!reports/rigor/
+!reports/inspect/
+!reports/notebook_figures/
+reports/rigor/*
+reports/inspect/*
+
+# milestones
+!reports/rigor/07-Jun-26/
+!reports/rigor/09-Jun-26/
+!reports/rigor/2026-05-13/
+!reports/rigor/transformer_fairshot_2026-06-07_183725/
+# baselines + tuned carrier runs ({kind}_{arch}_{tf})
+!reports/rigor/baselines/
+!reports/rigor/tune_cnn_lstm_5m/
+!reports/rigor/tune_cnn_lstm_15m/
+!reports/rigor/bootstrap_cnn_lstm_5m/
+!reports/rigor/bootstrap_cnn_lstm_15m/
+# named sweeps
+!reports/inspect/tradesim_2026-06-15/
+
+# bloat never tracked, even inside an allowlisted dir
+reports/**/*.html
+reports/**/*.npz
+reports/**/*.parquet
+reports/**/plots/

@@ -3,7 +3,7 @@
 
 Usage:
     python scripts/training/train.py --config experiments/lstm_g1.yaml
-    python scripts/training/train.py --config experiments/xgb_g1.yaml --set train.seeds=[42]
+    python scripts/training/train.py --config experiments/xgboost_g1.yaml --set train.seeds=[42]
     python scripts/training/train.py --config experiments/lstm_g1.yaml --seed 17
 
 Dispatches:
@@ -32,6 +32,22 @@ from src.config.schema import (
     XGBModelConfig,
     XLSTMModelConfig,
 )
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint subdir helper (WS-5)
+# ---------------------------------------------------------------------------
+
+def _ckpt_subdir(arch: str, timeframe: str) -> str:
+    """Return the checkpoint subdirectory name for *arch* and *timeframe* token.
+
+    Rule (plan §3.2):
+      - timeframe "h1" → ``arch`` only (no suffix) — existing paths unchanged.
+      - any other token → ``{arch}_{token}`` (e.g. "lstm_5m", "xgb_15m").
+    """
+    if timeframe == "h1":
+        return arch
+    return f"{arch}_{timeframe}"
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +168,8 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     data_dir = Path(cfg.data.data_dir)
     splits = cfg.data.splits
+    tf_token = cfg.data.timeframe  # "h1" | "5m" | "15m" (WS-5)
+    scope = cfg.data.dataset       # "spy" | "multisym"
 
     if splits == "legacy":
         from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
@@ -163,15 +181,15 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
     elif splits == "default":
         import pandas as pd
-        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(data_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(data_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(data_dir / f"{scope}_{tf_token}_test.parquet")
     else:
         import pandas as pd
         splits_dir = Path(splits)
-        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_test.parquet")
         print(f"  Using custom splits dir: {splits_dir}")
 
     if debug:
@@ -206,7 +224,7 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     # --- Class weights ---
     cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
-    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else f"class_weights_{scope}_{tf_token}.json"
     with open(cw_dir / cw_file) as f:
         cw = json.load(f)
     class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
@@ -249,8 +267,9 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         scheduler = None
 
     # --- Checkpoint path: lstm_seed{N}{label_tag}.pt ---
+    # Subdir is "lstm" for h1 (backward-compat) and "lstm_{token}" for other TFs (WS-5).
     label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
-    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "lstm"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / _ckpt_subdir("lstm", tf_token)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / f"lstm_seed{seed}{label_tag}.pt"
 
@@ -261,8 +280,8 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         mode="max",
     )
 
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir = Path("logs/training")
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_csv = log_dir / f"lstm_seed{seed}{label_tag}.csv"
 
     epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
@@ -318,6 +337,7 @@ def _train_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
             "n_params": n_params,
             "n_train_windows": len(train_ds),
             "train_fraction": train_fraction,
+            "timeframe": tf_token,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -478,6 +498,8 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     data_dir = Path(cfg.data.data_dir)
     splits = cfg.data.splits
+    tf_token = cfg.data.timeframe  # "h1" | "5m" | "15m" (WS-5)
+    scope = cfg.data.dataset       # "spy" | "multisym"
 
     if splits == "legacy":
         from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
@@ -489,15 +511,15 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
     elif splits == "default":
         import pandas as pd
-        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(data_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(data_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(data_dir / f"{scope}_{tf_token}_test.parquet")
     else:
         import pandas as pd
         splits_dir = Path(splits)
-        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_test.parquet")
         print(f"  Using custom splits dir: {splits_dir}")
 
     if debug:
@@ -532,7 +554,7 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     # --- Class weights ---
     cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
-    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else f"class_weights_{scope}_{tf_token}.json"
     with open(cw_dir / cw_file) as f:
         cw = json.load(f)
     class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
@@ -580,8 +602,9 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         scheduler = None
 
     # --- Checkpoint path: cnn_lstm_seed{N}{label_tag}.pt ---
+    # Subdir is "cnn_lstm" for h1 (backward-compat) and "cnn_lstm_{token}" for other TFs (WS-5).
     label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
-    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "cnn_lstm"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / _ckpt_subdir("cnn_lstm", tf_token)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / f"cnn_lstm_seed{seed}{label_tag}.pt"
 
@@ -592,8 +615,8 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         mode="max",
     )
 
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir = Path("logs/training")
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_csv = log_dir / f"cnn_lstm_seed{seed}{label_tag}.csv"
 
     epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
@@ -656,6 +679,7 @@ def _train_cnn_lstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
             "lstm_layers": m.lstm_layers,
             "n_train_windows": len(train_ds),
             "train_fraction": train_fraction,
+            "timeframe": tf_token,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -700,6 +724,8 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     data_dir = Path(cfg.data.data_dir)
     splits = cfg.data.splits
+    tf_token = cfg.data.timeframe  # "h1" | "5m" | "15m" (WS-5)
+    scope = cfg.data.dataset       # "spy" | "multisym"
 
     if splits == "legacy":
         from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
@@ -711,15 +737,15 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
         train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
     elif splits == "default":
         import pandas as pd
-        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(data_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(data_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(data_dir / f"{scope}_{tf_token}_test.parquet")
     else:
         import pandas as pd
         splits_dir = Path(splits)
-        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_test.parquet")
         print(f"  Using custom splits dir: {splits_dir}")
 
     if debug:
@@ -754,7 +780,7 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     # --- Class weights ---
     cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
-    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else f"class_weights_{scope}_{tf_token}.json"
     with open(cw_dir / cw_file) as f:
         cw = json.load(f)
     class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
@@ -800,8 +826,9 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
         scheduler = None
 
     # --- Checkpoint path: transformer_seed{N}{label_tag}.pt ---
+    # Subdir is "transformer" for h1 (backward-compat) and "transformer_{token}" for other TFs (WS-5).
     label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
-    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "transformer"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / _ckpt_subdir("transformer", tf_token)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / f"transformer_seed{seed}{label_tag}.pt"
 
@@ -812,8 +839,8 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
         mode="max",
     )
 
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir = Path("logs/training")
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_csv = log_dir / f"transformer_seed{seed}{label_tag}.csv"
 
     epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
@@ -875,6 +902,7 @@ def _train_transformer(cfg: ExperimentConfig, seed: int, debug: bool = False,
             "pool": m.pool,
             "n_train_windows": len(train_ds),
             "train_fraction": train_fraction,
+            "timeframe": tf_token,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -919,6 +947,8 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     data_dir = Path(cfg.data.data_dir)
     splits = cfg.data.splits
+    tf_token = cfg.data.timeframe  # "h1" | "5m" | "15m" (WS-5)
+    scope = cfg.data.dataset       # "spy" | "multisym"
 
     if splits == "legacy":
         from src.data.split import SPLIT_BOUNDARIES_2018_2024, temporal_split
@@ -930,15 +960,15 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         train_df, val_df, test_df = temporal_split(labeled_df, SPLIT_BOUNDARIES_2018_2024)
     elif splits == "default":
         import pandas as pd
-        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(data_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(data_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(data_dir / f"{scope}_{tf_token}_test.parquet")
     else:
         import pandas as pd
         splits_dir = Path(splits)
-        train_df = pd.read_parquet(splits_dir / "spy_h1_train.parquet")
-        val_df   = pd.read_parquet(splits_dir / "spy_h1_val.parquet")
-        test_df  = pd.read_parquet(splits_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_train.parquet")
+        val_df   = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_val.parquet")
+        test_df  = pd.read_parquet(splits_dir / f"{scope}_{tf_token}_test.parquet")
         print(f"  Using custom splits dir: {splits_dir}")
 
     if debug:
@@ -973,7 +1003,7 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
 
     # --- Class weights ---
     cw_dir  = data_dir if splits in ("default", "legacy") else Path(splits)
-    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else "class_weights.json"
+    cw_file = "class_weights_rawfvg.json" if label_key == "fvg" else f"class_weights_{scope}_{tf_token}.json"
     with open(cw_dir / cw_file) as f:
         cw = json.load(f)
     class_weights = torch.tensor([cw["0"], cw["1"], cw["2"]], dtype=torch.float32).to(device)
@@ -1018,8 +1048,9 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         scheduler = None
 
     # --- Checkpoint path: xlstm_seed{N}{label_tag}.pt ---
+    # Subdir is "xlstm" for h1 (backward-compat) and "xlstm_{token}" for other TFs (WS-5).
     label_tag = "" if label_key == "fvg_valid" else f"_{label_key}"
-    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / "xlstm"
+    ckpt_dir  = Path(cfg.runtime.checkpoint_dir) / _ckpt_subdir("xlstm", tf_token)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / f"xlstm_seed{seed}{label_tag}.pt"
 
@@ -1030,8 +1061,8 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
         mode="max",
     )
 
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir = Path("logs/training")
+    log_dir.mkdir(parents=True, exist_ok=True)
     log_csv = log_dir / f"xlstm_seed{seed}{label_tag}.csv"
 
     epoch_logs, best_epoch, best_f1 = _lstm_train_loop(
@@ -1091,6 +1122,7 @@ def _train_xlstm(cfg: ExperimentConfig, seed: int, debug: bool = False,
             "num_heads": m.num_heads,
             "n_train_windows": len(train_ds),
             "train_fraction": train_fraction,
+            "timeframe": tf_token,
         }, f, indent=2)
     print(f"Metadata saved: {meta_path}")
 
@@ -1113,9 +1145,10 @@ def _train_xgb(cfg: ExperimentConfig, seed: int, debug: bool = False) -> None:
     cmd = [
         sys.executable,
         str(Path(__file__).parent / "train_xgboost.py"),
-        "--seed",   str(seed),
-        "--label",  label_arg,
-        "--splits", splits_arg,
+        "--seed",      str(seed),
+        "--label",     label_arg,
+        "--splits",    splits_arg,
+        "--timeframe", cfg.data.timeframe,  # WS-5: routes to correct parquet + ckpt subdir
     ]
     print(f"Dispatching XGBoost subprocess: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=False)

@@ -1,0 +1,13 @@
+{
+  "note": "f1_old = legacy (SPLIT_BOUNDARIES_2018_2024, ValidFVG re-labelled, test 2023-2024). f1_new = default (2016-2025 splits, test 2023-2025). delta = f1_new - f1_old. Positive delta means new data helped.",
+  "lstm": {
+    "f1_old": 0.6019,
+    "f1_new": 0.5983,
+    "delta": -0.0036
+  },
+  "xgb": {
+    "f1_old": 0.5428,
+    "f1_new": 0.5294,
+    "delta": -0.0134
+  }
+}

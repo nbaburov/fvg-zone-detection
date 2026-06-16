@@ -67,6 +67,78 @@ def make_raw_window(n: int = 60) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Spy adapters — capture what window was actually received
+# ---------------------------------------------------------------------------
+
+
+class SpyAdapter(ModelAdapter):
+    """Records the window array passed to predict_proba for assertion."""
+
+    def __init__(self, name_: str, proba: list[float]) -> None:
+        self.name = name_
+        self._proba = np.array(proba, dtype=np.float32)
+        self.received: np.ndarray | None = None
+
+    def predict_proba(self, windows: np.ndarray) -> np.ndarray:
+        self.received = windows.copy()
+        n = windows.shape[0]
+        return np.tile(self._proba, (n, 1))
+
+
+# ---------------------------------------------------------------------------
+# Tests: window routing (raw → xgboost, normalised → DL)
+# ---------------------------------------------------------------------------
+
+
+class TestWindowRouting:
+    """Verify SingleModelDecision feeds the correct window kind to each adapter."""
+
+    def _make_event(self) -> tuple[WindowEvent, np.ndarray, np.ndarray]:
+        raw = make_raw_window()  # values ~100 (raw OHLCV)
+        norm = (raw / raw.max()).astype(np.float32)  # values in [0,1] — fake normalised
+        event = make_window_event(norm, raw)
+        return event, raw, norm
+
+    def test_xgboost_adapter_receives_raw_window(self):
+        """An adapter named 'xgboost' must receive event.raw_window, not normalised."""
+        spy = SpyAdapter("xgboost", [0.1, 0.8, 0.1])
+        decision = SingleModelDecision(spy, threshold=0.5)
+
+        event, raw, norm = self._make_event()
+        decision.decide(event)
+
+        assert spy.received is not None
+        # raw values are ~100; if spy got normalised input it would be ~[0,1]
+        assert spy.received[0].max() > 5.0, (
+            "XGBoostAdapter received normalised input (max ≤ 5). "
+            "decision.py routing is broken."
+        )
+        np.testing.assert_allclose(spy.received[0], raw.astype(np.float32), rtol=1e-5)
+
+    def test_dl_adapter_receives_normalised_window(self):
+        """A non-xgboost adapter (e.g. 'lstm') must receive event.window (normalised)."""
+        spy = SpyAdapter("lstm", [0.1, 0.8, 0.1])
+        decision = SingleModelDecision(spy, threshold=0.5)
+
+        event, raw, norm = self._make_event()
+        decision.decide(event)
+
+        assert spy.received is not None
+        np.testing.assert_allclose(spy.received[0], norm, rtol=1e-5)
+
+    def test_cnn_lstm_adapter_receives_normalised_window(self):
+        """cnn_lstm must also receive the normalised window."""
+        spy = SpyAdapter("cnn_lstm", [0.1, 0.8, 0.1])
+        decision = SingleModelDecision(spy, threshold=0.5)
+
+        event, raw, norm = self._make_event()
+        decision.decide(event)
+
+        assert spy.received is not None
+        np.testing.assert_allclose(spy.received[0], norm, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
 # Tests: threshold
 # ---------------------------------------------------------------------------
 
@@ -173,6 +245,20 @@ class TestGapExtraction:
         assert action.signal == "bull"
         assert action.gap_low == pytest.approx(92.0)   # raw[-1, 2]
         assert action.gap_high == pytest.approx(110.0)  # raw[-3, 1]
+
+    def test_bull_gap_extraction_uses_raw_window(self):
+        """Gap extraction always uses event.raw_window, not the normalised window."""
+        adapter = MockAdapter([0.0, 0.9, 0.1])
+        decision = SingleModelDecision(adapter, threshold=0.5)
+
+        raw = self._make_raw_known_gap("bull")
+        norm = (raw / 100.0).astype(np.float32)  # fake normalised — very different values
+        event = make_window_event(norm, raw)
+        action = decision.decide(event)
+
+        # Gap values must come from raw_window, not norm
+        assert action.gap_low == pytest.approx(92.0)
+        assert action.gap_high == pytest.approx(110.0)
 
     def test_bear_gap_extraction(self):
         adapter = MockAdapter([0.0, 0.1, 0.9])  # bear signal

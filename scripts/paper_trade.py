@@ -9,7 +9,7 @@ Usage
 -----
 # Live trading
 python scripts/paper_trade.py \\
-    --model lstm:checkpoints/lstm/lstm_seed42.pt \\
+    --model lstm:checkpoints/lstm_h1_spy/lstm_seed42.pt \\
     --session 20260511_093500 \\
     --symbol SPY \\
     --threshold 0.5 \\
@@ -21,7 +21,7 @@ python scripts/paper_trade.py \\
 # Replay a prior session (offline, no network)
 python scripts/paper_trade.py \\
     --replay 20260511_093500 \\
-    --model lstm:checkpoints/lstm/lstm_seed42.pt \\
+    --model lstm:checkpoints/lstm_h1_spy/lstm_seed42.pt \\
     --threshold 0.5
 
 Environment variables required (live mode)
@@ -85,7 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME:CHECKPOINT_PATH",
         help=(
             "Model adapter and checkpoint path, separated by colon. "
-            "Example: lstm:checkpoints/lstm/lstm_seed42.pt"
+            "Example: lstm:checkpoints/lstm_h1_spy/lstm_seed42.pt"
         ),
     )
     parser.add_argument(
@@ -188,7 +188,7 @@ def load_adapter_from_spec(spec: str):
     if ":" not in spec:
         raise ValueError(
             f"--model must be NAME:CHECKPOINT_PATH (got '{spec}'). "
-            "Example: lstm:checkpoints/lstm/lstm_seed42.pt"
+            "Example: lstm:checkpoints/lstm_h1_spy/lstm_seed42.pt"
         )
 
     name, checkpoint_path = spec.split(":", 1)

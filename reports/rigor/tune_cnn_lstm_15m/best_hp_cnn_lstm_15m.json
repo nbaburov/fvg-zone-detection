@@ -1,0 +1,18 @@
+{
+  "n_conv_layers": 3,
+  "conv_filters": 32,
+  "kernel_size": 3,
+  "use_pool": false,
+  "lstm_hidden": 64,
+  "lstm_layers": 1,
+  "dropout": 0.10399577780403041,
+  "head_dropout": 0.32072060000629327,
+  "lr": 0.00010543307185574993,
+  "weight_decay": 1.9592076566280767e-06,
+  "batch_size": 16,
+  "val_macro_f1": 0.7411995614234442,
+  "trial_number": 11,
+  "n_trials_completed": 7,
+  "study_name": "cnn_lstm_15m_fvg",
+  "storage": "/Users/nickb/Documents/Study/University/3rdYear/Sem6/Individual/smc-data-challenge/checkpoints/cnn_lstm_15m/optuna_2026-06-12.db"
+}

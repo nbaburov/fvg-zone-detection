@@ -68,7 +68,14 @@ class SingleModelDecision:
                 skip_reason=event.skip_reason,
             )
 
-        windows_batch = event.window[np.newaxis].astype(np.float32)  # (1, 60, 5)
+        # Mirror the inspect runner contract: xgboost expects RAW OHLCV;
+        # all DL adapters (lstm, cnn_lstm, transformer, xlstm) expect NORMALISED.
+        # Routing is by adapter.name == "xgboost", same as src/inspect/runner.py L184.
+        if self._adapter.name == "xgboost":
+            input_window = event.raw_window
+        else:
+            input_window = event.window
+        windows_batch = input_window[np.newaxis].astype(np.float32)  # (1, 60, 5)
         proba_batch = self._adapter.predict_proba(windows_batch)     # (1, 3)
         proba = proba_batch[0]                                        # (3,)
 

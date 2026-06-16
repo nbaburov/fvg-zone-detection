@@ -86,7 +86,7 @@ def test_cached_train_py_meta_format_not_zeroed(tmp_path):
     not silently zero minority-class columns by only checking test_per_class_f1."""
     import json
     arch = "transformer"
-    ckpt_dir = tmp_path / "ckpt" / arch
+    ckpt_dir = tmp_path / "ckpt" / "transformer_h1_spy"
     ckpt_dir.mkdir(parents=True)
     # train.py-format meta: separate keys, NO test_per_class_f1 array
     (ckpt_dir / f"{arch}_seed42.meta.json").write_text(json.dumps({

@@ -61,11 +61,13 @@ class XGBoostAdapter(ModelAdapter):
             self._checkpoint_path = Path(checkpoint_path)
         else:
             checkpoint_dir = Path(checkpoint_dir)
-            self._checkpoint_path = checkpoint_dir / "xgboost" / checkpoint_file
+            self._checkpoint_path = checkpoint_dir / "xgboost_h1_spy" / checkpoint_file
         if not self._checkpoint_path.exists():
             raise FileNotFoundError(
                 f"XGBoost checkpoint not found: {self._checkpoint_path}"
             )
+        # Resolved checkpoint path — exposed for post-load TF validation (H2).
+        self.checkpoint_path = self._checkpoint_path
 
         if not _NEED_SUBPROCESS:
             # In-process: load model now and verify class ordering

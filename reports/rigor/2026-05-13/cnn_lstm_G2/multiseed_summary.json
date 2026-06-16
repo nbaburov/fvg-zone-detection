@@ -1,0 +1,62 @@
+{
+  "seeds": [
+    {
+      "seed": 0,
+      "test_macro_f1": 0.5828558428771576,
+      "best_val_macro_f1": 0.6142378354900567,
+      "test_per_class_f1": [
+        0.966693744922827,
+        0.44242424242424244,
+        0.3394495412844037
+      ]
+    },
+    {
+      "seed": 17,
+      "test_macro_f1": 0.6198043931260989,
+      "best_val_macro_f1": 0.5832732809745265,
+      "test_per_class_f1": [
+        0.977261344285285,
+        0.47692307692307695,
+        0.40522875816993464
+      ]
+    },
+    {
+      "seed": 42,
+      "test_macro_f1": 0.6177026449556616,
+      "best_val_macro_f1": 0.6077521917858052,
+      "test_per_class_f1": [
+        0.9745549632907573,
+        0.4444444444444444,
+        0.43410852713178294
+      ]
+    },
+    {
+      "seed": 123,
+      "test_macro_f1": 0.6466052907630225,
+      "best_val_macro_f1": 0.6127602556173984,
+      "test_per_class_f1": [
+        0.9751283858624509,
+        0.4472049689440994,
+        0.5174825174825175
+      ]
+    },
+    {
+      "seed": 2024,
+      "test_macro_f1": 0.6033350244924593,
+      "best_val_macro_f1": 0.5781648516042641,
+      "test_per_class_f1": [
+        0.9798884906411788,
+        0.44176706827309237,
+        0.3883495145631068
+      ]
+    }
+  ],
+  "mean_test_macro_f1": 0.61406063924288,
+  "std_test_macro_f1": 0.020948448080232974,
+  "n_seeds": 5,
+  "gate_std_threshold": 0.1,
+  "gate_mean_threshold_suspicious": 0.55,
+  "lstm_baseline": 0.599,
+  "gate_g2": "PASS",
+  "note": "seed42 retrained with G1 HP after base-config checkpoint was found in cache"
+}

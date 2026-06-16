@@ -1,0 +1,18 @@
+{
+  "lstm": {
+    "macro_f1_mean": 0.5985481825924994,
+    "ci_95_lower": 0.563081360944283,
+    "ci_95_upper": 0.6353825635714474,
+    "n_seeds": 5,
+    "n_bootstrap": 1000,
+    "effective_n": 86
+  },
+  "xgb": {
+    "macro_f1_mean": 0.7212775797445895,
+    "ci_95_lower": 0.6709671693239591,
+    "ci_95_upper": 0.760782215821259,
+    "n_seeds": 5,
+    "n_bootstrap": 1000,
+    "effective_n": 86
+  }
+}

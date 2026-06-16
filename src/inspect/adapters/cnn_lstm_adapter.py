@@ -38,11 +38,14 @@ class CNNLSTMAdapter(ModelAdapter):
             checkpoint_path = Path(checkpoint_path)
         else:
             checkpoint_dir = Path(checkpoint_dir)
-            checkpoint_path = checkpoint_dir / "cnn_lstm" / checkpoint_file
+            checkpoint_path = checkpoint_dir / "cnn_lstm_h1_spy" / checkpoint_file
         if not checkpoint_path.exists():
             raise FileNotFoundError(
                 f"CNN-LSTM checkpoint not found: {checkpoint_path}"
             )
+
+        # Resolved checkpoint path — exposed for post-load TF validation (H2).
+        self.checkpoint_path = checkpoint_path
 
         # Read HP from meta sidecar so architecture matches checkpoint
         meta_path = checkpoint_path.with_suffix(".meta.json")

@@ -602,7 +602,7 @@ class TestAggregateSeedSummaries:
         _, resolve_fn = self._get_fn()
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create fake lstm multisym checkpoints for seeds 0 and 42
-            subdir = Path(tmpdir) / "lstm_multisym" / "lstm"
+            subdir = Path(tmpdir) / "lstm_h1_multisym"
             subdir.mkdir(parents=True)
             (subdir / "lstm_seed0.pt").touch()
             (subdir / "lstm_seed42.pt").touch()
@@ -624,9 +624,9 @@ class TestAggregateSeedSummaries:
         _, resolve_fn = self._get_fn()
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create empty xlstm dir
-            (Path(tmpdir) / "xlstm_multisym" / "xlstm").mkdir(parents=True)
+            (Path(tmpdir) / "xlstm_h1_multisym").mkdir(parents=True)
             # Create one valid lstm checkpoint so result is non-empty
-            lstm_dir = Path(tmpdir) / "lstm_multisym" / "lstm"
+            lstm_dir = Path(tmpdir) / "lstm_h1_multisym"
             lstm_dir.mkdir(parents=True)
             (lstm_dir / "lstm_seed42.pt").touch()
 

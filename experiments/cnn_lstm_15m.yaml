@@ -1,0 +1,36 @@
+# cnn_lstm_15m.yaml — CNN-LSTM on 15-minute bars (WS-5 timeframe-parametric plumbing).
+# HP identical to cnn_lstm_g1.yaml (G1 Optuna best HP, val macro-F1 0.6440 on H1).
+# Only change: data.timeframe = "15m" routes build_pipeline to spy_15m_*.parquet
+# and checkpoints to checkpoints/cnn_lstm_15m/.
+# NOTE: window_size left at 60 (H1 default). WS-7b sweep will determine the
+# optimal window for 15m bars — override with --set data.window_size=<N> at that point.
+name: cnn_lstm_15m_validfvg
+data:
+  labeller: fvg_valid
+  data_dir: data/processed
+  timeframe: "15m"
+  dataset: multisym
+  window_size: 60  # WS-7b sweep will decide — placeholder
+  stride: 3  # 15m has ~4× more bars than H1; stride=3 yields ~H1-multisym-scale window count (bars/window_size is stride-invariant, so data-bound experiment stays valid)
+model:
+  arch: cnn_lstm
+  n_conv_layers: 2
+  conv_filters: 16
+  kernel_size: 5
+  use_pool: false
+  pool_type: "max"
+  lstm_hidden: 32
+  lstm_layers: 2
+  dropout: 0.2217
+  head_dropout: 0.3624
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  batch_size: 16
+  lr: 0.000731
+  weight_decay: 7.476e-06
+  optimizer: adam
+  scheduler: none
+  max_epochs: 100
+  patience: 15
+  loss: weighted_ce
+  device: cpu

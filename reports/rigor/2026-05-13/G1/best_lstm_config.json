@@ -1,0 +1,13 @@
+{
+  "hidden_size": 128,
+  "num_layers": 1,
+  "dropout": 0.31753016617848756,
+  "head_dropout": 0.526205942764976,
+  "lr": 0.0005301506411688119,
+  "weight_decay": 3.9155649921300636e-05,
+  "batch_size": 16,
+  "val_macro_f1": 0.6372714595274264,
+  "trial_number": 42,
+  "study_name": "lstm_fvg_validfvg",
+  "storage": "/Users/nickb/Documents/Study/University/3rdYear/Sem6/Individual/smc-data-challenge/checkpoints/lstm/optuna_2026-05-12.db"
+}

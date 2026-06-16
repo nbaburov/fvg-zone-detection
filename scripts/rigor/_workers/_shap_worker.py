@@ -16,6 +16,10 @@ def main():
     parser.add_argument("--drop-threshold", type=float, default=1e-4)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--config", default=None)
+    parser.add_argument("--timeframe", default="h1",
+                        help="Timeframe token (h1|5m|15m).")
+    parser.add_argument("--scope", default="spy",
+                        help="Dataset scope (spy|multisym). Determines class_weights filename.")
     args = parser.parse_args()
 
     try:
@@ -65,13 +69,16 @@ def main():
             hp = json.load(fh)
         hp_clean = {k: v for k, v in hp.items()
                     if k not in ("val_macro_f1", "trial_number", "study_name", "storage")}
-        train_df_path = ROOT / "data" / "processed" / "spy_h1_train.parquet"
+        tf = args.timeframe
+        # shap_xgb.py always operates on the SPY single-symbol train set
+        train_df_path = ROOT / "data" / "processed" / f"spy_{tf}_train.parquet"
         import pandas as pd
         from src.features.window_features import extract_window_features
         train_df = pd.read_parquet(train_df_path)
         X_train, y_train = extract_window_features(train_df)
 
-        with open(ROOT / "data" / "processed" / "class_weights.json") as fh:
+        cw_name = f"class_weights_spy_{tf}.json"
+        with open(ROOT / "data" / "processed" / cw_name) as fh:
             cw = json.load(fh)
         w_arr = [float(cw[str(i)]) for i in range(3)]
         sw = np.array([w_arr[int(y)] for y in y_train], dtype=np.float32)
@@ -98,7 +105,7 @@ def main():
         names_sorted, vals_sorted = zip(*ranked)
         fig = go.Figure(go.Bar(x=list(vals_sorted), y=list(names_sorted), orientation="h"))
         fig.update_layout(title="Mean |SHAP| per feature (XGBoost)", height=900)
-        fig.write_html(str(out_dir / "shap_summary_xgb.html"))
+        fig.write_html(str(out_dir / "shap_summary_xgb.html"), include_plotlyjs="cdn")
     except Exception:
         pass
 

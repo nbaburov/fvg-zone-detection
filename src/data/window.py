@@ -11,22 +11,37 @@ from torch.utils.data import Dataset
 
 from src.data.labels.base import BaseLabeller
 from src.data.normalize import normalise_window
+from src.data.timeframe import H1 as _H1
 
-# Maximum gap between consecutive candles to consider them same session (90 min = 1.5 * H1)
-_MAX_INTRA_WINDOW_GAP_MINUTES = 90
+# Maximum gap between consecutive candles to consider them same session.
+# Single source of truth: Timeframe.H1.max_intra_window_gap_minutes (= 90 = 1.5 * 60).
+_MAX_INTRA_WINDOW_GAP_MINUTES = _H1.max_intra_window_gap_minutes
 
 
-def _has_session_gap(df: pd.DataFrame, start: int, end: int) -> bool:
+def _has_session_gap(
+    df: pd.DataFrame,
+    start: int,
+    end: int,
+    max_gap_minutes: int = _MAX_INTRA_WINDOW_GAP_MINUTES,
+) -> bool:
     """
     Return True if any two consecutive bars in df[start:end] are more than
-    _MAX_INTRA_WINDOW_GAP_MINUTES apart (i.e., a holiday/weekend gap).
+    *max_gap_minutes* apart (i.e., a holiday/weekend gap).
+
+    Args:
+        df: DataFrame with a DatetimeIndex.
+        start: Slice start index (inclusive).
+        end:   Slice end index (exclusive).
+        max_gap_minutes: Gap threshold in minutes. Defaults to the module-level
+            H1 constant (90 min). Pass ``tf.max_intra_window_gap_minutes`` to
+            make this TF-aware.
     """
     idx = df.index[start:end]
     if len(idx) < 2:
         return False
     diffs = idx[1:] - idx[:-1]
-    max_gap_minutes = diffs.max().total_seconds() / 60
-    return max_gap_minutes > _MAX_INTRA_WINDOW_GAP_MINUTES
+    actual_max = diffs.max().total_seconds() / 60
+    return actual_max > max_gap_minutes
 
 
 def _window_generator(
@@ -35,6 +50,7 @@ def _window_generator(
     stride: int,
     window_size: int,
     drop_cross_session_windows: bool,
+    max_gap_minutes: int = _MAX_INTRA_WINDOW_GAP_MINUTES,
 ) -> Generator[tuple[np.ndarray, int], None, None]:
     """
     Yield (normalised_window_array, encoded_label) for each valid window.
@@ -60,7 +76,7 @@ def _window_generator(
         if label_pos >= n:
             break
 
-        if drop_cross_session_windows and _has_session_gap(df, i, i + window_size):
+        if drop_cross_session_windows and _has_session_gap(df, i, i + window_size, max_gap_minutes):
             continue
 
         if has_symbol_col and len(set(symbols[i : i + window_size])) > 1:
@@ -79,18 +95,19 @@ def build_windows(
     stride: int = 1,
     window_size: int = 60,
     drop_cross_session_windows: bool = True,
+    max_gap_minutes: int = _MAX_INTRA_WINDOW_GAP_MINUTES,
 ) -> list[tuple[np.ndarray, int]]:
     """
-    Returns list of (window_array shape (60,5) float32, encoded_label int).
+    Returns list of (window_array shape (window_size,5) float32, encoded_label int).
     Calls normalise_window on each window before returning.
 
-    Note on window_size: the plan spec fixes window_size=60 as the standard configuration.
-    Accepting an arbitrary window_size is an intentional extension for future flexibility
-    (e.g., multi-resolution experiments). For production use, always pass window_size=60
-    or rely on the default. Non-60 values are not validated against the plan spec.
+    Args:
+        max_gap_minutes: Gap threshold for session-gap detection.
+            Defaults to 90 (H1). Pass ``tf.max_intra_window_gap_minutes`` for
+            TF-aware behaviour.
     """
     return list(
-        _window_generator(df, labeller, stride, window_size, drop_cross_session_windows)
+        _window_generator(df, labeller, stride, window_size, drop_cross_session_windows, max_gap_minutes)
     )
 
 
@@ -106,8 +123,9 @@ class SMCWindowDataset(Dataset):
         stride: int = 1,
         window_size: int = 60,
         drop_cross_session_windows: bool = True,
+        max_gap_minutes: int = _MAX_INTRA_WINDOW_GAP_MINUTES,
     ) -> None:
-        self._windows = build_windows(df, labeller, stride, window_size, drop_cross_session_windows)
+        self._windows = build_windows(df, labeller, stride, window_size, drop_cross_session_windows, max_gap_minutes)
 
     def __len__(self) -> int:
         return len(self._windows)

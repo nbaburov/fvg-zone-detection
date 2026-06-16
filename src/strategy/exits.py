@@ -275,6 +275,45 @@ def compute_exit(
         )
 
 
+def market_tp_from_entry(
+    entry: float,
+    sl: float,
+    tp_rr: float,
+    direction: int,
+) -> float:
+    """Take-profit price for a market (fixed_2r) entry, given the real fill.
+
+    Single source of truth for the *fill-time* TP geometry of a market entry:
+    the planner cannot know the fill price ahead of time (entry = next-bar
+    open), so the live ``PaperExecutor`` computes the TP once the entry is
+    known.  This keeps that arithmetic in ``exits.py`` (§0 keystone) instead of
+    inline in ``execution.py``.
+
+    Mirrors ``_compute_fixed_2r``: ``risk = |entry - sl|`` and
+    ``tp = entry ± tp_rr * risk`` (``+`` for bull, ``-`` for bear).
+
+    Parameters
+    ----------
+    entry : float
+        Actual entry/fill price.
+    sl : float
+        Stop-loss price (from the planner / ``compute_exit``).
+    tp_rr : float
+        Reward-to-risk multiple.
+    direction : int
+        1 = bull, 2 = bear.
+
+    Returns
+    -------
+    float
+        Take-profit price.
+    """
+    risk = abs(entry - sl)
+    if direction == 1:
+        return entry + tp_rr * risk
+    return entry - tp_rr * risk
+
+
 # ---------------------------------------------------------------------------
 # V1 — fixed_2r (market entry, gap-edge SL, 2R TP)
 # ---------------------------------------------------------------------------

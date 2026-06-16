@@ -1,0 +1,96 @@
+{
+  "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA"
+  ],
+  "early_window": [
+    "2016-01-04",
+    "2016-01-29"
+  ],
+  "recent_window": [
+    "2025-04-01",
+    "2025-04-30"
+  ],
+  "raw": {
+    "SPY": {
+      "early": {
+        "ok": true,
+        "usable_h1": 126,
+        "first_bar": "2016-01-04 09:30:00-05:00",
+        "last_bar": "2016-01-28 15:30:00-05:00"
+      },
+      "recent": {
+        "ok": true,
+        "usable_h1": 140,
+        "first_bar": "2025-04-01 09:30:00-04:00",
+        "last_bar": "2025-04-29 15:30:00-04:00"
+      }
+    },
+    "QQQ": {
+      "early": {
+        "ok": true,
+        "usable_h1": 126,
+        "first_bar": "2016-01-04 09:30:00-05:00",
+        "last_bar": "2016-01-28 15:30:00-05:00"
+      },
+      "recent": {
+        "ok": true,
+        "usable_h1": 140,
+        "first_bar": "2025-04-01 09:30:00-04:00",
+        "last_bar": "2025-04-29 15:30:00-04:00"
+      }
+    },
+    "IWM": {
+      "early": {
+        "ok": true,
+        "usable_h1": 126,
+        "first_bar": "2016-01-04 09:30:00-05:00",
+        "last_bar": "2016-01-28 15:30:00-05:00"
+      },
+      "recent": {
+        "ok": true,
+        "usable_h1": 140,
+        "first_bar": "2025-04-01 09:30:00-04:00",
+        "last_bar": "2025-04-29 15:30:00-04:00"
+      }
+    },
+    "DIA": {
+      "early": {
+        "ok": true,
+        "usable_h1": 126,
+        "first_bar": "2016-01-04 09:30:00-05:00",
+        "last_bar": "2016-01-28 15:30:00-05:00"
+      },
+      "recent": {
+        "ok": true,
+        "usable_h1": 140,
+        "first_bar": "2025-04-01 09:30:00-04:00",
+        "last_bar": "2025-04-29 15:30:00-04:00"
+      }
+    }
+  },
+  "summary": {
+    "SPY": {
+      "reaches_2016": true,
+      "recent_ratio_vs_spy": 1.0,
+      "early_ratio_vs_spy": 1.0
+    },
+    "QQQ": {
+      "reaches_2016": true,
+      "recent_ratio_vs_spy": 1.0,
+      "early_ratio_vs_spy": 1.0
+    },
+    "IWM": {
+      "reaches_2016": true,
+      "recent_ratio_vs_spy": 1.0,
+      "early_ratio_vs_spy": 1.0
+    },
+    "DIA": {
+      "reaches_2016": true,
+      "recent_ratio_vs_spy": 1.0,
+      "early_ratio_vs_spy": 1.0
+    }
+  }
+}

@@ -10,13 +10,13 @@ Usage
 
     # Per-model checkpoint override (name:path form — mirrors paper_trade.py):
     python scripts/inspect_models.py --dataset test --models \\
-        cnn_lstm:checkpoints/cnn_lstm_multisym/cnn_lstm/cnn_lstm_seed0.pt \\
-        lstm:checkpoints/lstm_multisym/lstm/lstm_seed0.pt \\
-        transformer:checkpoints/transformer_multisym/transformer/transformer_seed0.pt \\
-        xgboost:checkpoints/xgb_multisym/xgboost/xgb_seed42.ubj
+        cnn_lstm:checkpoints/cnn_lstm_h1_multisym/cnn_lstm_seed0.pt \\
+        lstm:checkpoints/lstm_h1_multisym/lstm_seed0.pt \\
+        transformer:checkpoints/transformer_h1_multisym/transformer_seed0.pt \\
+        xgboost:checkpoints/xgboost_h1_multisym/xgb_seed42.ubj
 
-    Bare names (e.g. --models lstm xgboost) use --checkpoint-dir + default seed,
-    exactly as before.  Mixed forms are allowed.
+    Bare names (e.g. --models lstm xgboost) use --checkpoint-dir + default seed (H1 SPY).
+    Mixed forms are allowed.  Use --dataset multisym + --all-seeds for multi-symbol sweeps.
 
 Output is written to reports/inspect/<YYYY-MM-DD_HHMMSS>/.
 
@@ -57,7 +57,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Adapters to load. Each token is either a bare name (e.g. lstm) "
             "or name:path pointing at a specific checkpoint file "
-            "(e.g. cnn_lstm:checkpoints/cnn_lstm_multisym/cnn_lstm/cnn_lstm_seed0.pt). "
+            "(e.g. cnn_lstm:checkpoints/cnn_lstm_h1_multisym/cnn_lstm_seed0.pt). "
             "Bare names use --checkpoint-dir + the adapter's default seed. "
             "Default: all discovered adapters."
         ),
@@ -103,6 +103,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="DIR",
         dest="output_dir",
         help="Base output directory. A timestamped subdir is created. Default: reports/inspect/.",
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        metavar="NAME",
+        help="Descriptive run label. Output dir becomes <label>_<timestamp> instead of a "
+        "bare timestamp, so runs stay self-documenting (e.g. --label tradesim_15m_spy).",
     )
     parser.add_argument(
         "--list",
@@ -249,57 +256,81 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "and other realism flags beyond --realistic defaults are not applied."
         ),
     )
+    parser.add_argument(
+        "--timeframe",
+        default="h1",
+        choices=["h1", "5m", "15m"],
+        metavar="TF",
+        help=(
+            "Timeframe token for dataset and checkpoint resolution.  "
+            "Default: h1 (resolves spy_h1_test.parquet + checkpoints/lstm_h1_spy/ etc).  "
+            "Non-h1 tokens resolve spy_{token}_test.parquet and "
+            "checkpoints/{arch}_{token}_{dataset}/ etc."
+        ),
+    )
+    parser.add_argument(
+        "--ckpt-dataset",
+        default="spy",
+        choices=["spy", "multisym"],
+        dest="ckpt_dataset",
+        help=(
+            "Dataset token for checkpoint resolution (distinct from --dataset which "
+            "selects the evaluation split).  "
+            "'spy' (default): bare-name + --all-seeds resolve SPY-only checkpoints "
+            "(checkpoints/{arch}_{tf}_spy/).  "
+            "'multisym': resolve multi-symbol checkpoints "
+            "(checkpoints/{arch}_{tf}_multisym/).  "
+            "Note: --all-seeds formerly always resolved multisym; pass --ckpt-dataset multisym "
+            "to keep that behaviour explicitly."
+        ),
+    )
+    parser.add_argument(
+        "--tuned",
+        action="store_true",
+        dest="tuned",
+        help=(
+            "Resolve the _tuned checkpoint variant "
+            "(e.g. checkpoints/cnn_lstm_15m_multisym_tuned/).  "
+            "Only cnn_lstm at 5m/15m have tuned checkpoints.  "
+            "Implies --ckpt-dataset multisym when combined with non-h1 --timeframe."
+        ),
+    )
     return parser.parse_args(argv)
 
 
-def _resolve_dataset_path(dataset: str) -> Path:
-    """Resolve dataset argument to a parquet file path."""
-    split_map = {
-        "train": "data/processed/spy_h1_train.parquet",
-        "val": "data/processed/spy_h1_val.parquet",
-        "test": "data/processed/spy_h1_test.parquet",
-    }
-    if dataset in split_map:
-        return _ROOT / split_map[dataset]
+def _resolve_dataset_path(dataset: str, token: str = "h1") -> Path:
+    """Resolve dataset argument to a parquet file path.
+
+    Parameters
+    ----------
+    dataset : str
+        One of ``"train"``, ``"val"``, ``"test"`` for standard splits, or a
+        path string.
+    token : str
+        Timeframe token (``"h1"``, ``"5m"``, ``"15m"``).  For standard splits
+        the token is substituted into the filename:
+        ``spy_{token}_{split}.parquet`` (all timeframes now flat in data/processed/).
+
+    Returns
+    -------
+    Path
+        Absolute path to the parquet file.
+    """
+    _SPLITS = {"train", "val", "test"}
+    if dataset in _SPLITS:
+        return _ROOT / f"data/processed/spy_{token}_{dataset}.parquet"
     p = Path(dataset)
     if not p.is_absolute():
         p = _ROOT / p
     return p
 
 
-_ALL_SEEDS = [0, 17, 42, 123, 2024]
-
-# Maps arch_name -> (multisym_subdir, filename_template)
-# xgboost uses .ubj; all DL archs use .pt
-_MULTISYM_DIRS: dict[str, tuple[str, str]] = {
-    "lstm": ("lstm_multisym/lstm", "lstm_seed{seed}.pt"),
-    "cnn_lstm": ("cnn_lstm_multisym/cnn_lstm", "cnn_lstm_seed{seed}.pt"),
-    "transformer": ("transformer_multisym/transformer", "transformer_seed{seed}.pt"),
-    "xgboost": ("xgb_multisym/xgboost", "xgb_seed{seed}.ubj"),
-    "xlstm": ("xlstm_multisym/xlstm", "xlstm_seed{seed}.pt"),
-}
-
-
-def _resolve_multisym_checkpoints(
-    checkpoint_dir: Path,
-) -> dict[str, list[tuple[int, Path]]]:
-    """Resolve available multisym checkpoints per arch.
-
-    Returns a mapping arch_name -> list of (seed, path) for checkpoints
-    that exist on disk.  Archs with zero found files are omitted; caller
-    should warn and skip them.
-    """
-    result: dict[str, list[tuple[int, Path]]] = {}
-    for arch, (subdir, tmpl) in _MULTISYM_DIRS.items():
-        found: list[tuple[int, Path]] = []
-        for seed in _ALL_SEEDS:
-            fname = tmpl.format(seed=seed)
-            p = checkpoint_dir / subdir / fname
-            if p.exists():
-                found.append((seed, p))
-        if found:
-            result[arch] = found
-    return result
+# Multisym constants and checkpoint resolution extracted to src/inspect/multisym.py.
+# Re-export the shared symbols so existing callers inside this script are unchanged.
+from src.inspect.multisym import ALL_SEEDS as _ALL_SEEDS  # noqa: E402
+from src.inspect.multisym import MULTISYM_DIRS as _MULTISYM_DIRS  # noqa: E402
+from src.inspect.multisym import _multisym_dirs_for_token as _multisym_dirs_for_token  # noqa: E402
+from src.inspect.multisym import resolve_multisym_checkpoints as _resolve_multisym_checkpoints  # noqa: E402
 
 
 def _aggregate_seed_summaries(
@@ -373,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     # -----------------------------------------------------------------------
     # Load dataset
     # -----------------------------------------------------------------------
-    dataset_path = _resolve_dataset_path(args.dataset)
+    dataset_path = _resolve_dataset_path(args.dataset, token=args.timeframe)
     if not dataset_path.exists():
         print(f"ERROR: Dataset not found: {dataset_path}", file=sys.stderr)
         return 1
@@ -448,6 +479,37 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 model_names.append(name)
 
+    # -----------------------------------------------------------------------
+    # Validate checkpoint TF against --timeframe (§3.10).
+    # Hoisted (H2): runs for EVERY resolved checkpoint — bare-name, multisym,
+    # and explicit name:path override — not just overrides.  Each adapter
+    # exposes its resolved ``checkpoint_path``; we read the timeframe token
+    # from the sidecar meta.  Missing meta → assume "h1" (no error).  Present
+    # but mismatched → hard error.  Delegates to the single source of truth
+    # ``resolve_tf_from_meta`` in src/live/fleet.py.
+    # -----------------------------------------------------------------------
+    from src.live.fleet import resolve_tf_from_meta as _resolve_tf_from_meta
+
+    _requested_tf_token = args.timeframe  # e.g. "h1", "5m"
+
+    def _validate_adapter_tf(_adapters) -> bool:
+        """Return True if all adapters' checkpoint TF matches the request."""
+        for _ad in _adapters:
+            _cp = getattr(_ad, "checkpoint_path", None)
+            if _cp is None:
+                continue  # adapter did not expose a path → cannot validate
+            _ckpt_tf_token = _resolve_tf_from_meta(_cp)  # missing meta → "h1"
+            if _ckpt_tf_token != _requested_tf_token:
+                print(
+                    f"ERROR: Checkpoint for '{getattr(_ad, 'name', _cp)}' declares "
+                    f"timeframe={_ckpt_tf_token!r} but --timeframe={_requested_tf_token!r}.  "
+                    "Pass the matching --timeframe flag or use a checkpoint trained on "
+                    f"the {_requested_tf_token!r} timeframe.",
+                    file=sys.stderr,
+                )
+                return False
+        return True
+
     print(f"Loading adapters: {model_names}")
     if checkpoint_path_overrides:
         print(f"Checkpoint overrides: {checkpoint_path_overrides}")
@@ -486,15 +548,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: Checkpoint not found — {exc}", file=sys.stderr)
             return 1
 
+    # Hard-error on any TF mismatch across all loaded (bare-name / override) adapters.
+    if not _validate_adapter_tf(adapters):
+        return 1
+
     # -----------------------------------------------------------------------
     # Run inference
     # -----------------------------------------------------------------------
     from src.inspect.runner import run
 
     print("Running inference...")
+    from src.data.timeframe import Timeframe as _TF
+
     results = run(
         adapters=adapters, df_slice=df, labeller=labeller,
         lookahead_bars=args.lookahead_bars,
+        timeframe=_TF.from_token(args.timeframe),
     )
 
     print(f"Windows built: {results.n}")
@@ -533,7 +602,8 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = Path(args.output_dir)
     if not output_dir.is_absolute():
         output_dir = _ROOT / output_dir
-    run_dir = output_dir / timestamp_str
+    run_name = f"{args.label}_{timestamp_str}" if args.label else timestamp_str
+    run_dir = output_dir / run_name
 
     import dataclasses
     from src.strategy.exits import ExitConfig
@@ -935,23 +1005,33 @@ def main(argv: list[str] | None = None) -> int:
             "xlstm": XLSTMAdapter,
         }
 
+        # Resolve checkpoint dataset — --tuned implies multisym for non-h1 TF
+        _all_seeds_dataset = args.ckpt_dataset
+        if args.tuned and args.timeframe != "h1" and _all_seeds_dataset == "spy":
+            _all_seeds_dataset = "multisym"
+
         # Use models requested (or all known archs if --models not specified)
+        _tf_dirs = _multisym_dirs_for_token(args.timeframe, dataset=_all_seeds_dataset)
         requested_archs = [
             n.split(":", 1)[0] if ":" in n else n
-            for n in (args.models or list(_MULTISYM_DIRS.keys()))
+            for n in (args.models or list(_tf_dirs.keys()))
         ]
-        # Filter to only archs that have multisym checkpoint templates
-        requested_archs = [a for a in requested_archs if a in _MULTISYM_DIRS]
+        # Filter to only archs that have checkpoint templates for this TF/dataset
+        requested_archs = [a for a in requested_archs if a in _tf_dirs]
 
-        checkpoint_map = _resolve_multisym_checkpoints(checkpoint_dir)
+        checkpoint_map = _resolve_multisym_checkpoints(
+            checkpoint_dir, token=args.timeframe,
+            dataset=_all_seeds_dataset, tuned=args.tuned,
+        )
 
         all_seeds_data = {}  # arch -> {strategy -> aggregated dict}
 
         for arch in requested_archs:
             if arch not in checkpoint_map:
+                _expected_dir = f"checkpoints/{arch}_{args.timeframe}_{_all_seeds_dataset}" + ("_tuned" if args.tuned else "")  # noqa: E501
                 print(
-                    f"WARNING: {arch} has no multisym checkpoints under "
-                    f"checkpoints/{arch}_multisym/ — skipping from --all-seeds "
+                    f"WARNING: {arch} has no checkpoints under "
+                    f"{_expected_dir}/ — skipping from --all-seeds "
                     f"(custom --models name:path entries are not used in all-seeds mode).",
                     file=sys.stderr,
                 )
@@ -986,12 +1066,19 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     continue
 
+                # H2: a multisym checkpoint trained on a different TF must not
+                # be inspected under a mismatched --timeframe.
+                if not _validate_adapter_tf([adapter]):
+                    return 1
+
                 # Run inference for this seed
+                from src.data.timeframe import Timeframe as _TF2
                 seed_results = run_inference(
                     adapters=[adapter],
                     df_slice=df,
                     labeller=labeller,
                     lookahead_bars=args.lookahead_bars,
+                    timeframe=_TF2.from_token(args.timeframe),
                 )
 
                 # seed_results is fresh per-seed; its only preds key is this adapter's name.

@@ -62,8 +62,18 @@ def parse_args() -> argparse.Namespace:
         choices=["validfvg", "rawfvg"],
         default="validfvg",
         help=(
-            "validfvg (default): load class_weights.json, save as xgb_seed{N}.ubj. "
+            "validfvg (default): load class_weights_{scope}_{tf}.json, save as xgb_seed{N}.ubj. "
             "rawfvg: load class_weights_rawfvg.json from splits dir, save as xgb_seed{N}_rawfvg.ubj."
+        ),
+    )
+    # Timeframe token (WS-5) — routes to correct parquet files and checkpoint subdir.
+    # "h1" (default) reproduces the existing spy_h1_*.parquet / checkpoints/xgboost_h1_spy/ paths.
+    parser.add_argument(
+        "--timeframe",
+        default="h1",
+        help=(
+            "Timeframe token: 'h1' (default), '5m', '15m'. Controls which parquet "
+            "files are loaded and the checkpoint subdirectory used."
         ),
     )
     # Config-driven path (Phase 1 addition) — optional; backwards compat when omitted
@@ -116,9 +126,21 @@ def format_confusion_matrix(cm: np.ndarray, class_names: list[str]) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def _xgb_ckpt_subdir(timeframe: str) -> str:
+    """Checkpoint subdir for XGBoost — "xgboost" for h1 (backward-compat), "xgb_{token}" otherwise."""
+    if timeframe == "h1":
+        return "xgboost"
+    return f"xgb_{timeframe}"
+
+
 def main() -> None:
     args = parse_args()
     seed = args.seed
+    # When --output-dir was not explicitly passed by the caller, derive from timeframe
+    # so 5m/15m writes to checkpoints/xgboost_5m_multisym/ rather than overwriting checkpoints/xgboost/.
+    _default_output = "checkpoints/xgboost"
+    if args.output_dir == _default_output and args.timeframe != "h1":
+        args.output_dir = f"checkpoints/{_xgb_ckpt_subdir(args.timeframe)}"
     output_dir = REPO / args.output_dir
 
     # Config-driven HP — load YAML if --config provided, else use XGBoostFVGClassifier defaults
@@ -165,6 +187,16 @@ def main() -> None:
     # 1. Load splits
     # ------------------------------------------------------------------
     data_dir = REPO / "data" / "processed"
+    tf_token = args.timeframe  # "h1" | "5m" | "15m" — controls parquet filenames (WS-5)
+    # Derive scope from --config YAML dataset field when available, default to "spy"
+    _scope = "spy"
+    if args.config is not None:
+        try:
+            from src.config import load_experiment as _le
+            _s_cfg = _le(args.config)
+            _scope = _s_cfg.data.dataset
+        except Exception:
+            pass
     print("Loading splits...")
     if args.splits == "legacy":
         labeled_df = pd.read_parquet(data_dir / "spy_h1_labeled.parquet")
@@ -177,19 +209,19 @@ def main() -> None:
         print(f"  Using SPLIT_BOUNDARIES_2018_2024 + ValidFVG re-label (train 2018-2021, test 2023-2024)")
         splits_data_dir = data_dir
     elif args.splits == "default":
-        train_df = pd.read_parquet(data_dir / "spy_h1_train.parquet")
-        val_df = pd.read_parquet(data_dir / "spy_h1_val.parquet")
-        test_df = pd.read_parquet(data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(data_dir / f"{_scope}_{tf_token}_train.parquet")
+        val_df = pd.read_parquet(data_dir / f"{_scope}_{tf_token}_val.parquet")
+        test_df = pd.read_parquet(data_dir / f"{_scope}_{tf_token}_test.parquet")
         splits_data_dir = data_dir
     else:
         # Treat as a directory path containing pre-split parquets
         splits_data_dir = Path(args.splits)
-        train_df = pd.read_parquet(splits_data_dir / "spy_h1_train.parquet")
-        val_df = pd.read_parquet(splits_data_dir / "spy_h1_val.parquet")
-        test_df = pd.read_parquet(splits_data_dir / "spy_h1_test.parquet")
+        train_df = pd.read_parquet(splits_data_dir / f"{_scope}_{tf_token}_train.parquet")
+        val_df = pd.read_parquet(splits_data_dir / f"{_scope}_{tf_token}_val.parquet")
+        test_df = pd.read_parquet(splits_data_dir / f"{_scope}_{tf_token}_test.parquet")
         print(f"  Using custom splits dir: {splits_data_dir}")
 
-    cw_filename = "class_weights_rawfvg.json" if args.label == "rawfvg" else "class_weights.json"
+    cw_filename = "class_weights_rawfvg.json" if args.label == "rawfvg" else f"class_weights_{_scope}_{tf_token}.json"
     with open(splits_data_dir / cw_filename) as fh:
         cw_raw = json.load(fh)
     class_weights = {int(k): float(v) for k, v in cw_raw.items()}
@@ -357,6 +389,7 @@ def main() -> None:
         "test_bull_f1": float(bull_f1_test),
         "test_bear_f1": float(bear_f1_test),
         "naive_majority_macro_f1": float(naive_f1),
+        "timeframe": tf_token,
     }
     with open(meta_path, "w") as fh:
         json.dump(meta_out, fh, indent=2)
@@ -472,7 +505,7 @@ Confusion matrix (test) — rows=actual, cols=predicted (none/bull/bear):
 - **XGBoost test macro-F1: {macro_f1_test:.4f}** — this is the floor DL models must beat.
 - Bull F1 floor: {bull_f1_test:.4f}
 - Bear F1 floor: {bear_f1_test:.4f}
-- Model saved at: checkpoints/xgboost/xgb_seed42.ubj
+- Model saved at: checkpoints/xgboost_h1_spy/xgb_seed42.ubj
 - Naive baseline macro-F1: {naive_f1:.4f} (delta to XGBoost: {macro_f1_test - naive_f1:+.4f})
 
 Note on overlapping windows: stride=1 produces highly overlapping windows (59/60 shared bars between adjacent windows). This is standard for XGBoost tabular evaluation and matches the distribution DL models will train on. F1 is computed on a held-out temporal test split (2023-2024), so temporal leakage is not a concern despite overlap.

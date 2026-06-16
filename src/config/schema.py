@@ -19,6 +19,19 @@ class DataConfig(BaseModel):
     window_size: int = 60
     stride: int = 1
     drop_cross_session: bool = False
+    timeframe: str = "h1"
+    dataset: Literal["spy", "multisym"] = "spy"
+
+    @property
+    def timeframe_obj(self):
+        """Resolve token string → Timeframe value object.
+
+        Returns the canonical ``Timeframe`` instance for ``self.timeframe``.
+        Raises ``ValueError`` for unrecognised tokens (deferred to access time
+        so YAML loading never fails on an unknown token — only on use).
+        """
+        from src.data.timeframe import Timeframe  # local import avoids circular deps
+        return Timeframe.from_token(self.timeframe)
 
 
 class LSTMModelConfig(BaseModel):

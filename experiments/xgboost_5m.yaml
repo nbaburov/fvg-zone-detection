@@ -1,0 +1,29 @@
+# xgb_5m.yaml — XGBoost on 5-minute bars (WS-5 timeframe-parametric plumbing).
+# HP identical to xgb_g1.yaml (G1 Optuna best HP, val macro-F1 0.6908 on H1).
+# Only change: data.timeframe = "5m" routes build_pipeline to spy_5m_*.parquet
+# and checkpoints to checkpoints/xgb_5m/.
+# NOTE: window_size left at 60 (H1 default). WS-7b sweep will determine the
+# optimal window for 5m bars — override with --set data.window_size=<N> at that point.
+# NOTE: XGB uses engineered features from window_features.py; those features are
+# computed on the window regardless of TF. The feature semantics change at 5m
+# (e.g. bar-level ATR). Per plan §3, no feature re-engineering in WS-5 — that is
+# deferred to the feature-expansion work item.
+name: xgb_5m_validfvg
+data:
+  labeller: fvg_valid
+  data_dir: data/processed
+  timeframe: "5m"
+  dataset: multisym
+  window_size: 60  # WS-7b sweep will decide — placeholder
+  stride: 9  # 5m has ~12× more bars than H1; stride=9 yields ~H1-multisym-scale window count (bars/window_size is stride-invariant, so data-bound experiment stays valid)
+model:
+  arch: xgb
+  n_estimators: 513
+  max_depth: 4
+  learning_rate: 0.1311447837531049
+  min_child_weight: 1
+  subsample: 0.826439213403869
+  colsample_bytree: 0.7249466284356196
+train:
+  seeds: [0, 17, 42, 123, 2024]
+  device: cpu

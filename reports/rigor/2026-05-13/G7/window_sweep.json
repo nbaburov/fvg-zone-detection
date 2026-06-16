@@ -1,0 +1,49 @@
+{
+  "results": [
+    {
+      "window_size": 30,
+      "val_macro_f1": 0.5571158223160714,
+      "test_macro_f1": 0.5306155332524471,
+      "n_test_windows": 5228,
+      "effective_n": 174
+    },
+    {
+      "window_size": 45,
+      "val_macro_f1": 0.5574537680319608,
+      "test_macro_f1": 0.5120998742244319,
+      "n_test_windows": 5213,
+      "effective_n": 115
+    },
+    {
+      "window_size": 60,
+      "val_macro_f1": 0.6074425360036176,
+      "test_macro_f1": 0.593535502951732,
+      "n_test_windows": 5198,
+      "effective_n": 86
+    },
+    {
+      "window_size": 90,
+      "val_macro_f1": 0.6277452354313553,
+      "test_macro_f1": 0.5866653400029262,
+      "n_test_windows": 5168,
+      "effective_n": 57
+    },
+    {
+      "window_size": 120,
+      "val_macro_f1": 0.6364408679719437,
+      "test_macro_f1": 0.6001841882359086,
+      "n_test_windows": 5138,
+      "effective_n": 42
+    }
+  ],
+  "best_by_val_f1": {
+    "window_size": 120,
+    "val_f1": 0.6364408679719437,
+    "test_f1": 0.6001841882359086
+  },
+  "best_by_test_f1": {
+    "window_size": 120,
+    "test_f1": 0.6001841882359086
+  },
+  "note": "Larger windows improve F1 but reduce effective_n. W=60 is canonical (balance of F1 and statistical coverage). W=120 is best by val but effective_n=42 is very small."
+}

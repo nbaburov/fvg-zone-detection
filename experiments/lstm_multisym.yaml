@@ -5,7 +5,8 @@
 # Run via: python scripts/rigor/multiseed_run.py --model lstm --config experiments/lstm_multisym.yaml
 name: lstm_multisym_validfvg
 data:
-  data_dir: data/processed/multisym
+  data_dir: data/processed
+  dataset: multisym
   labeller: fvg_valid
   window_size: 60
 model:

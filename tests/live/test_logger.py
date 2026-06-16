@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from src.live.decision import TradeAction
-from src.live.logger import FillEvent, SessionLogger
+from src.live.logger import FillEvent, FleetSessionLogger, SessionLogger
 from src.live.slippage import SlippageModel
 from src.live.stream import MinuteBar
 from src.live.window_builder import H1Bar, WindowEvent
@@ -200,3 +200,170 @@ class TestLoggerSchema:
         record = json.loads(lines[0])
         assert "portfolio_value" in record
         assert record["portfolio_value"] == pytest.approx(100000.0)
+
+
+# ---------------------------------------------------------------------------
+# FleetSessionLogger tests
+# ---------------------------------------------------------------------------
+
+def _make_minute_bar(symbol: str = "SPY", ts: str = "2024-01-02 10:01:00") -> MinuteBar:
+    return MinuteBar(
+        symbol=symbol,
+        timestamp=pd.Timestamp(ts, tz="America/New_York"),
+        open=100.0,
+        high=101.0,
+        low=99.0,
+        close=100.5,
+        volume=1234.0,
+    )
+
+
+class _FakeIntent:
+    """Minimal OrderIntent-like object for testing log_intent."""
+    import math as _math
+
+    ticker = "SPY"
+    model = "cnn_lstm"
+    strategy = "ict_iofed"
+    h1_timestamp = pd.Timestamp("2024-01-02 10:30:00", tz="America/New_York")
+    direction = 1
+    signal = "bull"
+    confidence = 0.72
+    entry = 452.30
+    sl = 451.00
+    tp = 454.90
+    entry_type = "limit"
+    skip_reason = None
+
+
+@pytest.fixture
+def fleet_logger(tmp_path):
+    log = FleetSessionLogger(session_id="fleet_test", base_dir=str(tmp_path))
+    yield log, tmp_path
+    log.close()
+
+
+class TestFleetSessionLoggerNamespacing:
+    def test_cell_logger_creates_subdir(self, fleet_logger):
+        log, base = fleet_logger
+        cell = log.cell_logger("SPY", "cnn_lstm", "ict_iofed")
+        cell_dir = base / "fleet_test" / "SPY" / "cnn_lstm" / "ict_iofed"
+        assert cell_dir.exists()
+
+    def test_different_cells_return_different_loggers(self, fleet_logger):
+        log, base = fleet_logger
+        cell_a = log.cell_logger("SPY", "cnn_lstm", "ict_iofed")
+        cell_b = log.cell_logger("QQQ", "lstm", "fixed_2r")
+        assert cell_a is not cell_b
+
+    def test_same_cell_returns_same_instance(self, fleet_logger):
+        log, base = fleet_logger
+        cell_a = log.cell_logger("SPY", "cnn_lstm", "ict_iofed")
+        cell_b = log.cell_logger("SPY", "cnn_lstm", "ict_iofed")
+        assert cell_a is cell_b
+
+
+class TestFleetLogBar:
+    def test_log_bar_live_writes_jsonl(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        bar = _make_minute_bar("SPY")
+        log.log_bar(bar, source="live")
+        log.close()
+
+        path = base / "fleet_test" / "bars_1m_fleet.jsonl"
+        assert path.exists()
+        record = json.loads(path.read_text().strip().splitlines()[0])
+        assert record["symbol"] == "SPY"
+        assert record["source"] == "live"
+
+    def test_log_bar_backfill_source_tag(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        log.log_bar(_make_minute_bar("QQQ"), source="backfill")
+        log.close()
+
+        path = base / "fleet_test" / "bars_1m_fleet.jsonl"
+        record = json.loads(path.read_text().strip().splitlines()[0])
+        assert record["source"] == "backfill"
+        assert record["symbol"] == "QQQ"
+
+    def test_log_bar_multiple_tickers(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        log.log_bar(_make_minute_bar("SPY"), source="live")
+        log.log_bar(_make_minute_bar("IWM"), source="backfill")
+        log.close()
+
+        path = base / "fleet_test" / "bars_1m_fleet.jsonl"
+        lines = path.read_text().strip().splitlines()
+        assert len(lines) == 2
+        symbols = {json.loads(l)["symbol"] for l in lines}
+        assert symbols == {"SPY", "IWM"}
+
+
+class TestFleetLogIntent:
+    def test_intent_written_to_root_jsonl(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        intent = _FakeIntent()
+        log.log_intent(intent)
+        log.close()
+
+        root_jsonl = base / "fleet_test" / "intents.jsonl"
+        assert root_jsonl.exists()
+        record = json.loads(root_jsonl.read_text().strip().splitlines()[0])
+        assert record["ticker"] == "SPY"
+        assert record["model"] == "cnn_lstm"
+        assert record["strategy"] == "ict_iofed"
+        assert record["signal"] == "bull"
+        assert record["skip_reason"] is None
+
+    def test_intent_written_to_cell_jsonl(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        intent = _FakeIntent()
+        log.log_intent(intent)
+        log.close()
+
+        cell_jsonl = (
+            base / "fleet_test" / "SPY" / "cnn_lstm" / "ict_iofed" / "intents.jsonl"
+        )
+        assert cell_jsonl.exists()
+        record = json.loads(cell_jsonl.read_text().strip().splitlines()[0])
+        assert record["ticker"] == "SPY"
+
+    def test_intent_schema_has_required_fields(self, fleet_logger):
+        import json
+        log, base = fleet_logger
+        log.log_intent(_FakeIntent())
+        log.close()
+
+        record = json.loads(
+            (base / "fleet_test" / "intents.jsonl").read_text().strip()
+        )
+        required = {
+            "ticker", "model", "strategy", "h1_timestamp",
+            "direction", "signal", "confidence",
+            "entry", "sl", "tp", "entry_type", "skip_reason",
+        }
+        assert required.issubset(set(record.keys()))
+
+    def test_nan_values_serialised_as_null(self, fleet_logger):
+        import json, math
+        log, base = fleet_logger
+
+        class NanIntent(_FakeIntent):
+            entry = float("nan")
+            tp = float("nan")
+            skip_reason = "DEGENERATE_GEOMETRY"
+
+        log.log_intent(NanIntent())
+        log.close()
+
+        record = json.loads(
+            (base / "fleet_test" / "intents.jsonl").read_text().strip()
+        )
+        assert record["entry"] is None
+        assert record["tp"] is None
+        assert record["skip_reason"] == "DEGENERATE_GEOMETRY"

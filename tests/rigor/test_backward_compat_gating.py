@@ -183,10 +183,10 @@ class TestClipGradNormNotCalledForLegacyArchs:
         loader = _make_loader(n=16)
 
         # Stub out the data-loading and class-weight helpers
-        monkeypatch.setattr(ss, "_load_splits", lambda _: (
+        monkeypatch.setattr(ss, "_load_splits", lambda *_, **__: (
             _make_fake_df(200), _make_fake_df(60), _make_fake_df(60)
         ))
-        monkeypatch.setattr(ss, "_load_class_weights", lambda _: [1.0, 3.0, 3.0])
+        monkeypatch.setattr(ss, "_load_class_weights", lambda *_a, **_k: [1.0, 3.0, 3.0])
 
         ckpt_path = tmp_path / f"{arch}_seed42.pt"
         meta_path = tmp_path / f"{arch}_seed42.meta.json"
@@ -227,10 +227,10 @@ class TestClipGradNormNotCalledForLegacyArchs:
             data_dir=tmp_path / "data",
         )
 
-        monkeypatch.setattr(ss, "_load_splits", lambda _: (
+        monkeypatch.setattr(ss, "_load_splits", lambda *_, **__: (
             _make_fake_df(200), _make_fake_df(60), _make_fake_df(60)
         ))
-        monkeypatch.setattr(ss, "_load_class_weights", lambda _: [1.0, 3.0, 3.0])
+        monkeypatch.setattr(ss, "_load_class_weights", lambda *_a, **_k: [1.0, 3.0, 3.0])
 
         ckpt_path = tmp_path / "transformer_seed42.pt"
         meta_path = tmp_path / "transformer_seed42.meta.json"

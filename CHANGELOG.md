@@ -4,6 +4,60 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-16] - Repository standardization, lower-timeframe + multi-symbol results, licensing
+
+A large consolidation commit. Two threads land together: the feature work since the
+last commit (multi-symbol expansion, lower-timeframe ladder, tuned carrier, live
+fleet harness) and a repository-wide cleanup that puts every on-disk artifact on one
+flat, explicit, test-enforced naming scheme.
+
+### Results landed
+- **Multi-symbol expansion.** Pooled SPY+QQQ+IWM+DIA training lifts the recurrent
+  models (CNN-LSTM 0.639 to 0.675, LSTM 0.595 to 0.640); the Transformer does not
+  move (instability-bound, not data-bound). Confirms the task is data-bound.
+- **Lower-timeframe ladder (5m / 15m).** Resampling the cached 1-min bars multiplies
+  labelled positives ~4x (15m) / ~12x (5m). Carrier (CNN-LSTM) Optuna-tuned per TF
+  then 5-seed retrained with bootstrap CIs: 15m 0.691, 5m 0.713 (best DL in the
+  project). Leaderboard flips at 5m: tuned CNN-LSTM 0.713 overtakes XGBoost 0.654.
+- **Trade-sim sweep** across 4 tickers x {5m,15m} x 4 strategies x 5 seeds: only
+  15m SPY `fixed_2r` clears costs. Provenance in `reports/inspect/tradesim_2026-06-15/`.
+- **Live fleet harness.** `src/live/` fleet stack (fleet, fleet_state, fleet_replay,
+  fill_router, sim_executor, order_plan, backfill) + `scripts/paper_trade_fleet.py`,
+  `scripts/replay_fleet.py`.
+
+### Naming + organization (flat, explicit, everywhere)
+- **Checkpoints:** `checkpoints/{arch}_{tf}_{dataset}[_tuned]/` with files directly
+  inside (`{arch}_seed{N}.pt`, `xgb_seed{N}.ubj`). Authority: `src/inspect/multisym.py`.
+- **Processed data:** `data/processed/{scope}_{tf}_{split}.parquet` and
+  `class_weights_{scope}_{tf}.json` (`src/data/timeframe.py` parametrises the TF).
+- **Experiments:** `xgb_*` renamed to `xgboost_*`; added per-arch 5m/15m configs;
+  removed template/orphan cruft.
+- **scripts/rigor/** reorganized from a flat 19-file directory into semantic
+  subdirs: `tune/`, `sweeps/`, `stats/`, `eval/`, `pipelines/`.
+- **logs/** standardized to `logs/{training,paper,fleet}/`.
+- **reports/** cleaned (442M to 26M): superseded runtime runs deleted, regenerable
+  bloat (html/npz/plots) pruned, canonical dirs given explicit names
+  (`tune_cnn_lstm_5m`, `bootstrap_cnn_lstm_15m`, `baselines/`, `tradesim_2026-06-15/`).
+
+### Tracking policy + .gitignore
+- `.gitignore` rewritten clean and accurate. Commit policy made consistent: raw 1-min
+  bars (~188M) ignored with a `.gitkeep` (regenerable from Alpaca); processed model
+  inputs (~38M), all trained checkpoints, the gold set, and notebook figures tracked
+  so results reproduce and notebooks render without API keys or a retrain.
+- `reports/` tracked via a summaries-only allowlist (json/md/csv/png; never
+  html/npz/parquet/plots), enforced by `tests/rigor/test_reports_layout.py`.
+
+### Documentation
+- New **`LICENSE`** (PolyForm Noncommercial 1.0.0: free for noncommercial use with
+  attribution; commercial use requires a separate license) and **`CONTRIBUTING.md`**
+  (setup, test gates, the four critical constraints, naming conventions, PR norms).
+- `docs/overview.md` and `docs/architecture.md` de-staled to the multi-symbol +
+  lower-timeframe results and the current data layout.
+- All docs humanized: no em-dashes or double-dashes; private tooling references removed.
+- `README.md` licence + contributing pointers added.
+
+---
+
 ## [2026-06-09] — Documentation overhaul: plain-language showcase set
 
 Restructured `docs/` into a clean, plain-language, showcase-grade documentation set. Standard applied: explain concepts, don't name-drop; define jargon on first use; no hallucinations or speculative claims; readable by non-technical and non-financial readers.

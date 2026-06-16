@@ -424,13 +424,13 @@ def test_multisym_pipeline_symbol_column_present(two_symbol_h1_frames, tmp_path)
     from src.data.pipeline import build_multi_symbol_pipeline
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             train_ds, val_ds, test_ds, weights = build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
-    train_df = pd.read_parquet(tmp_path / "spy_h1_train.parquet")
+    train_df = pd.read_parquet(tmp_path / "multisym_h1_train.parquet")
     assert "symbol" in train_df.columns, "Pooled train parquet must have 'symbol' column"
     assert set(train_df["symbol"].unique()) == {"SPY", "QQQ"}, (
         f"Expected symbols SPY+QQQ, got {set(train_df['symbol'].unique())}"
@@ -451,14 +451,14 @@ def test_multisym_pipeline_split_is_per_symbol_no_leakage(two_symbol_h1_frames, 
     test_start_day = pd.Timestamp(SPLIT_BOUNDARIES["test_start"], tz="America/New_York")
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
-    train_df = pd.read_parquet(tmp_path / "spy_h1_train.parquet")
-    test_df = pd.read_parquet(tmp_path / "spy_h1_test.parquet")
+    train_df = pd.read_parquet(tmp_path / "multisym_h1_train.parquet")
+    test_df = pd.read_parquet(tmp_path / "multisym_h1_test.parquet")
 
     # All train rows must be on or before the train_end calendar date (date comparison).
     train_idx = pd.DatetimeIndex(train_df.index)
@@ -484,14 +484,14 @@ def test_multisym_pipeline_bars_contiguous_per_symbol(two_symbol_h1_frames, tmp_
     from src.data.pipeline import build_multi_symbol_pipeline
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
     for split in ("train", "val", "test"):
-        df = pd.read_parquet(tmp_path / f"spy_h1_{split}.parquet")
+        df = pd.read_parquet(tmp_path / f"multisym_h1_{split}.parquet")
         # Check contiguity: symbol values should form one or two contiguous blocks, not interleaved
         symbol_changes = (df["symbol"] != df["symbol"].shift()).sum() - 1  # -1 for the first row
         n_symbols = df["symbol"].nunique()
@@ -513,8 +513,8 @@ def test_multisym_pipeline_class_weights_from_pooled_train(two_symbol_h1_frames,
     from src.data.pipeline import build_multi_symbol_pipeline
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             _, _, _, weights = build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
@@ -527,24 +527,21 @@ def test_multisym_pipeline_class_weights_from_pooled_train(two_symbol_h1_frames,
 
 
 def test_multisym_pipeline_class_weights_json_written(two_symbol_h1_frames, tmp_path):
-    """class_weights.json and suffixed variant written to multisym dir."""
+    """class_weights_multisym_h1.json written to PROCESSED_DIR with correct keys."""
     from src.data.pipeline import build_multi_symbol_pipeline
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
-    legacy = tmp_path / "class_weights.json"
-    assert legacy.exists(), "class_weights.json not written to multisym dir"
-    with open(legacy) as f:
+    cw_path = tmp_path / "class_weights_multisym_h1.json"
+    assert cw_path.exists(), "class_weights_multisym_h1.json not written to PROCESSED_DIR"
+    with open(cw_path) as f:
         w = json.load(f)
     assert set(w.keys()) == {"0", "1", "2"}, f"Unexpected keys: {set(w.keys())}"
-
-    suffixed = tmp_path / "class_weights_fvg_valid.json"
-    assert suffixed.exists(), "class_weights_fvg_valid.json not written to multisym dir"
 
 
 def test_multisym_pipeline_dataset_meta_json(two_symbol_h1_frames, tmp_path):
@@ -553,13 +550,13 @@ def test_multisym_pipeline_dataset_meta_json(two_symbol_h1_frames, tmp_path):
     from src.data.split import SPLIT_BOUNDARIES
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
-    meta_path = tmp_path / "dataset_meta.json"
+    meta_path = tmp_path / "multisym_dataset_meta.json"
     assert meta_path.exists(), "dataset_meta.json not written"
 
     with open(meta_path) as f:
@@ -585,33 +582,29 @@ def test_multisym_pipeline_dataset_meta_json(two_symbol_h1_frames, tmp_path):
 
 def test_multisym_pipeline_does_not_overwrite_spy_only_dir(two_symbol_h1_frames, tmp_path):
     """
-    build_multi_symbol_pipeline writes to MULTISYM_DIR only.
-    The SPY-only PROCESSED_DIR parquets must NOT be touched.
+    build_multi_symbol_pipeline writes multisym_* files to PROCESSED_DIR.
+    SPY-only parquets (spy_h1_*.parquet) in the same dir must NOT be overwritten.
     """
     from src.data.pipeline import build_multi_symbol_pipeline
 
-    spy_only_dir = tmp_path / "spy_only"
-    multisym_dir = tmp_path / "multisym"
-    spy_only_dir.mkdir()
-
-    # Write a sentinel file in spy_only_dir to confirm it is untouched
-    sentinel = spy_only_dir / "spy_h1_train.parquet"
+    # Write a sentinel spy_h1_train.parquet in the shared PROCESSED_DIR dir
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    sentinel = tmp_path / "spy_h1_train.parquet"
     sentinel.write_bytes(b"sentinel")
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(multisym_dir)):
-            with patch("src.data.pipeline.PROCESSED_DIR", str(spy_only_dir)):
-                build_multi_symbol_pipeline(
-                    symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
-                )
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
+            build_multi_symbol_pipeline(
+                symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
+            )
 
     assert sentinel.read_bytes() == b"sentinel", (
-        "build_multi_symbol_pipeline overwrote spy_only/spy_h1_train.parquet — it must not touch PROCESSED_DIR"
+        "build_multi_symbol_pipeline overwrote spy_h1_train.parquet — it must not touch spy-only files"
     )
 
-    assert (multisym_dir / "spy_h1_train.parquet").exists(), (
-        "Multisym train parquet not written to MULTISYM_DIR"
+    assert (tmp_path / "multisym_h1_train.parquet").exists(), (
+        "Multisym train parquet not written to PROCESSED_DIR"
     )
 
 
@@ -621,8 +614,8 @@ def test_multisym_pipeline_returns_three_datasets_and_tensor(two_symbol_h1_frame
     from torch.utils.data import Dataset
 
     stub = _make_download_h1_stub(two_symbol_h1_frames)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             train_ds, val_ds, test_ds, weights = build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
@@ -729,15 +722,15 @@ def test_multisym_pipeline_per_symbol_split_distinguishes_from_pooled(tmp_path):
     symbol_dfs = {"SPY": df_spy, "QQQ": df_qqq}
     stub = _make_download_h1_stub(symbol_dfs)
 
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
-    train_df = pd.read_parquet(tmp_path / "spy_h1_train.parquet")
-    val_df = pd.read_parquet(tmp_path / "spy_h1_val.parquet")
-    test_df = pd.read_parquet(tmp_path / "spy_h1_test.parquet")
+    train_df = pd.read_parquet(tmp_path / "multisym_h1_train.parquet")
+    val_df = pd.read_parquet(tmp_path / "multisym_h1_val.parquet")
+    test_df = pd.read_parquet(tmp_path / "multisym_h1_test.parquet")
 
     train_end = pd.Timestamp(SPLIT_BOUNDARIES["train_end"], tz="America/New_York")
     val_start = pd.Timestamp(SPLIT_BOUNDARIES["val_start"], tz="America/New_York")
@@ -907,14 +900,14 @@ def test_multisym_pipeline_label_alignment_after_pooling(tmp_path):
     expected_label_qqq = int(df_qqq.loc[ts_qqq, "label"])
 
     stub = _make_download_h1_stub(symbol_dfs)
-    with patch("src.data.pipeline.download_h1", side_effect=stub):
-        with patch("src.data.pipeline.MULTISYM_DIR", str(tmp_path)):
+    with patch("src.data.pipeline.download_bars", side_effect=stub):
+        with patch("src.data.pipeline.PROCESSED_DIR", str(tmp_path)):
             build_multi_symbol_pipeline(
                 symbols=["SPY", "QQQ"], labeller_name="fvg_valid", window_size=60
             )
 
     # Read back the pooled train parquet
-    train_df = pd.read_parquet(tmp_path / "spy_h1_train.parquet")
+    train_df = pd.read_parquet(tmp_path / "multisym_h1_train.parquet")
 
     # Locate the rows we care about (both timestamps are in train: 200th bar from 2018-01-02)
     def _label_at(df, symbol, ts):

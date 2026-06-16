@@ -49,7 +49,7 @@ def _build_synthetic_adapter(tmp_path: Path, extra_meta: dict | None = None):
     model.eval()
 
     # Save checkpoint (bare state_dict)
-    ckpt_dir = tmp_path / "xlstm"
+    ckpt_dir = tmp_path / "xlstm_h1_spy"
     ckpt_dir.mkdir(parents=True)
     ckpt_path = ckpt_dir / "xlstm_seed42.pt"
     torch.save(model.state_dict(), str(ckpt_path))

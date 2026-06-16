@@ -3,7 +3,7 @@
 Covers:
   A1. TransformerAdapter with checkpoint_path= loads a non-default seed file and
       predict_proba returns (N,3) softmax.  Proves the override path is used by
-      pointing at seed1 (which default resolution — seed0 — would never reach) and
+      pointing at seed17 (which default resolution — seed0 — would never reach) and
       asserting no FileNotFoundError + output shape/dtype contract.
   A2. Backward compat — constructing each torch adapter WITHOUT checkpoint_path
       (old positional checkpoint_dir + default seed) still works unchanged.
@@ -13,7 +13,7 @@ Covers:
   A4. CLI name:path token parsing in _parse_args / inline main() logic — tested at
       the argparse level via _parse_args and the token-split logic extracted from
       the inline loop.  Bare names do not populate overrides; name:path tokens do.
-  A5. XGBoostAdapter with checkpoint_path= pointing at a real .ubj file (xgb_multisym)
+  A5. XGBoostAdapter with checkpoint_path= pointing at a real .ubj file (xgboost_multisym)
       loads successfully (constructor only — no predict_proba call to avoid subprocess
       overhead in CI; the worker invocation path is already exercised by the existing
       xgboost adapter tests).  Confirms _checkpoint_path is set to the override path.
@@ -30,12 +30,12 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _CKPT = _REPO_ROOT / "checkpoints"
 
-_TRANSFORMER_SEED0 = _CKPT / "transformer" / "transformer_seed0.pt"
-_TRANSFORMER_SEED1 = _CKPT / "transformer" / "transformer_seed1.pt"
-_XGB_MULTISYM_SEED42 = _CKPT / "xgb_multisym" / "xgboost" / "xgb_seed42.ubj"
+_TRANSFORMER_SEED0 = _CKPT / "transformer_h1_spy" / "transformer_seed0.pt"
+_TRANSFORMER_ALT = _CKPT / "transformer_h1_spy" / "transformer_seed17.pt"
+_XGB_MULTISYM_SEED42 = _CKPT / "xgboost_h1_multisym" / "xgb_seed42.ubj"
 
 _HAS_TRANSFORMER_SEED0 = _TRANSFORMER_SEED0.exists()
-_HAS_TRANSFORMER_SEED1 = _TRANSFORMER_SEED1.exists()
+_HAS_TRANSFORMER_ALT = _TRANSFORMER_ALT.exists()
 _HAS_XGB_MULTISYM = _XGB_MULTISYM_SEED42.exists()
 
 
@@ -44,7 +44,7 @@ _HAS_XGB_MULTISYM = _XGB_MULTISYM_SEED42.exists()
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _HAS_TRANSFORMER_SEED1, reason="transformer seed1 checkpoint absent")
+@pytest.mark.skipif(not _HAS_TRANSFORMER_ALT, reason="transformer seed17 checkpoint absent")
 def test_transformer_adapter_checkpoint_path_override_loads():
     """Constructing TransformerAdapter with checkpoint_path= pointing at seed1
     must succeed and produce a (N,3) float32 softmax output.
@@ -52,7 +52,7 @@ def test_transformer_adapter_checkpoint_path_override_loads():
     Revert-sensitivity: removing the `if checkpoint_path is not None` branch in
     TransformerAdapter.__init__ causes it to attempt
     checkpoint_dir / 'transformer' / 'transformer_seed0.pt', which is a
-    *different* file than seed1, so the test would either silently load the wrong
+    *different* file than seed17, so the test would either silently load the wrong
     weights (behaviour change) or raise FileNotFoundError if checkpoint_dir is
     tmp_path (construction path breaks).
     """
@@ -63,7 +63,7 @@ def test_transformer_adapter_checkpoint_path_override_loads():
     # which does not exist under tmp_path and raises FileNotFoundError.
     adapter = TransformerAdapter(
         checkpoint_dir=Path("/nonexistent_dir_should_not_be_used"),
-        checkpoint_path=_TRANSFORMER_SEED1,
+        checkpoint_path=_TRANSFORMER_ALT,
     )
     rng = np.random.default_rng(42)
     windows = rng.standard_normal((3, 60, 5)).astype(np.float32)
@@ -73,7 +73,7 @@ def test_transformer_adapter_checkpoint_path_override_loads():
     np.testing.assert_allclose(out.sum(axis=1), np.ones(3, dtype=np.float32), atol=1e-5)
 
 
-@pytest.mark.skipif(not _HAS_TRANSFORMER_SEED1, reason="transformer seed1 checkpoint absent")
+@pytest.mark.skipif(not _HAS_TRANSFORMER_ALT, reason="transformer seed17 checkpoint absent")
 def test_transformer_adapter_checkpoint_path_override_uses_sidecar_from_override_path(tmp_path):
     """The meta sidecar must be resolved as checkpoint_path.with_suffix('.meta.json'),
     not from the (dummy) checkpoint_dir.
@@ -85,11 +85,11 @@ def test_transformer_adapter_checkpoint_path_override_uses_sidecar_from_override
     """
     from src.inspect.adapters.transformer_adapter import TransformerAdapter
 
-    # seed1 has a real sidecar next to it; passing /nonexistent as checkpoint_dir
+    # seed17 has a real sidecar next to it; passing /nonexistent as checkpoint_dir
     # proves the sidecar is found via checkpoint_path, not checkpoint_dir.
     adapter = TransformerAdapter(
         checkpoint_dir=Path("/nonexistent_dir_should_not_be_used"),
-        checkpoint_path=_TRANSFORMER_SEED1,
+        checkpoint_path=_TRANSFORMER_ALT,
     )
     assert adapter is not None
 
@@ -121,13 +121,13 @@ def test_transformer_adapter_backward_compat_no_override():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _HAS_TRANSFORMER_SEED1, reason="transformer seed1 checkpoint absent")
+@pytest.mark.skipif(not _HAS_TRANSFORMER_ALT, reason="transformer seed17 checkpoint absent")
 def test_load_adapters_checkpoint_paths_mapping_uses_override():
-    """load_adapters with checkpoint_paths={"transformer": seed1_path} must load
-    from seed1, even though checkpoint_dir points at the default seed.
+    """load_adapters with checkpoint_paths={"transformer": seed17_path} must load
+    from seed17, even though checkpoint_dir points at the default seed.
 
     Revert-sensitivity: if load_adapters does not forward checkpoint_path to the
-    adapter ctor, the adapter loads the default seed0 instead of seed1.  The
+    adapter ctor, the adapter loads the default seed0 instead of seed17.  The
     distinction is proven by passing a /nonexistent checkpoint_dir: default
     resolution would raise FileNotFoundError, override succeeds.
     """
@@ -136,7 +136,7 @@ def test_load_adapters_checkpoint_paths_mapping_uses_override():
     adapters = load_adapters(
         ["transformer"],
         checkpoint_dir=Path("/nonexistent_dir_should_not_be_used"),
-        checkpoint_paths={"transformer": str(_TRANSFORMER_SEED1)},
+        checkpoint_paths={"transformer": str(_TRANSFORMER_ALT)},
     )
     assert len(adapters) == 1
     rng = np.random.default_rng(9)
@@ -218,7 +218,7 @@ def test_cli_name_colon_path_populates_overrides():
     adapter falls back to dir/default rather than the specified path.
     """
     tokens = [
-        "transformer:/some/path/transformer_seed1.pt",
+        "transformer:/some/path/transformer_seed17.pt",
         "lstm",
         "cnn_lstm:/other/path/cnn_lstm_seed0.pt",
     ]
@@ -233,7 +233,7 @@ def test_cli_name_colon_path_populates_overrides():
             model_names.append(token)
 
     assert model_names == ["transformer", "lstm", "cnn_lstm"]
-    assert overrides["transformer"] == "/some/path/transformer_seed1.pt"
+    assert overrides["transformer"] == "/some/path/transformer_seed17.pt"
     assert overrides["cnn_lstm"] == "/other/path/cnn_lstm_seed0.pt"
     assert "lstm" not in overrides
 
@@ -286,9 +286,9 @@ def test_cli_argparse_models_accepts_name_colon_path(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _HAS_XGB_MULTISYM, reason="xgb_multisym seed42 checkpoint absent")
+@pytest.mark.skipif(not _HAS_XGB_MULTISYM, reason="xgboost_multisym seed42 checkpoint absent")
 def test_xgboost_adapter_checkpoint_path_override_constructor():
-    """XGBoostAdapter with checkpoint_path= pointing at xgb_multisym/xgboost/xgb_seed42.ubj
+    """XGBoostAdapter with checkpoint_path= pointing at xgboost_multisym/xgboost/xgb_seed42.ubj
     must construct without error and store the override path.
 
     This exercises the `if checkpoint_path is not None` branch in XGBoostAdapter.__init__.
@@ -308,7 +308,7 @@ def test_xgboost_adapter_checkpoint_path_override_constructor():
     assert adapter._checkpoint_path == _XGB_MULTISYM_SEED42
 
 
-@pytest.mark.skipif(not _HAS_XGB_MULTISYM, reason="xgb_multisym seed42 checkpoint absent")
+@pytest.mark.skipif(not _HAS_XGB_MULTISYM, reason="xgboost_multisym seed42 checkpoint absent")
 def test_xgboost_adapter_checkpoint_path_override_path_is_stored():
     """_checkpoint_path attribute must reflect the explicit override, not a
     dir-derived path.

@@ -1,0 +1,14 @@
+{
+  "validfvg": {
+    "majority_macro_f1": 0.3280842430683026,
+    "random_macro_f1": 0.1851924478913207,
+    "n_test": 5257,
+    "pos_rate": 0.031006277344493058
+  },
+  "rawfvg": {
+    "majority_macro_f1": 0.2851855883313377,
+    "random_macro_f1": 0.2750345303266964,
+    "n_test": 5257,
+    "pos_rate": 0.2524253376450447
+  }
+}

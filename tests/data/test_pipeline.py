@@ -126,7 +126,7 @@ def test_no_candle_overlap_between_splits():
 
 
 def test_class_weights_json_written():
-    """class_weights.json must be written with keys '0', '1', '2'."""
+    """class_weights_spy_h1.json must be written with keys '0', '1', '2'."""
     full_df = _make_labelled_h1()
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -135,8 +135,8 @@ def test_class_weights_json_written():
                 from src.data.pipeline import build_pipeline
                 build_pipeline(labeller_name="fvg_valid", window_size=60)
 
-        weights_path = os.path.join(tmpdir, "class_weights.json")
-        assert os.path.exists(weights_path), "class_weights.json not written"
+        weights_path = os.path.join(tmpdir, "class_weights_spy_h1.json")
+        assert os.path.exists(weights_path), "class_weights_spy_h1.json not written"
         with open(weights_path) as f:
             w = json.load(f)
         assert set(w.keys()) == {"0", "1", "2"}, f"Unexpected keys: {set(w.keys())}"

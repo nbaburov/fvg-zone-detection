@@ -1,0 +1,15 @@
+{
+  "hidden_size": 128,
+  "num_layers": 1,
+  "dropout": 0.31753016617848756,
+  "head_dropout": 0.526205942764976,
+  "lr": 0.0005301506411688119,
+  "weight_decay": 3.9155649921300636e-05,
+  "batch_size": 16,
+  "best_value": 0.6373,
+  "n_complete": 38,
+  "n_pruned": 38,
+  "trial_number": 42,
+  "study_name": "lstm_fvg_validfvg",
+  "storage": "checkpoints/lstm/optuna_2026-05-12.db"
+}

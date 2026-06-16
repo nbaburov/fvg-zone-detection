@@ -33,53 +33,82 @@ class MinuteBar:
 
 
 class AlpacaBarStream:
-    """Streams 1-minute bars for a single symbol from Alpaca WebSocket.
+    """Streams 1-minute bars for one or more symbols from Alpaca WebSocket.
+
+    All symbols are subscribed on a **single** ``StockDataStream`` connection;
+    Alpaca IEX supports ``subscribe_bars(handler, *symbols)`` on one socket.
 
     Parameters
     ----------
     api_key : str
     secret_key : str
-    symbol : str
-        Ticker to subscribe to (e.g. "SPY").
+    symbols : str | list[str]
+        Ticker(s) to subscribe to (e.g. ``"SPY"`` or ``["SPY", "QQQ"]``).
+        A bare ``str`` is coerced to ``[str]`` for backward compatibility with
+        existing single-symbol callers.
     on_bar : Callable[[MinuteBar], None]
-        Called on each new or updated bar.
+        Called on each new or updated bar.  ``bar.symbol`` identifies the
+        source ticker when multiple symbols are subscribed.
     on_reconnect : Optional[Callable[[], None]]
         Called after a successful reconnect so the window builder can trigger
         REST gap-fill.
     paper : bool
         Use paper feed URL (default True).
+
+    Notes
+    -----
+    The old ``symbol: str`` parameter is still accepted as a positional
+    argument — passing a single string works identically to before.
     """
 
     def __init__(
         self,
         api_key: str,
         secret_key: str,
-        symbol: str,
+        symbols: "str | list[str]",
         on_bar: Callable[[MinuteBar], None],
         on_reconnect: Optional[Callable[[], None]] = None,
         paper: bool = True,
     ) -> None:
         self._api_key = api_key
         self._secret_key = secret_key
-        self._symbol = symbol
+        # Coerce bare string → list so the rest of the class is uniform.
+        if isinstance(symbols, str):
+            self._symbols: list[str] = [symbols]
+        else:
+            self._symbols = list(symbols)
+        # Legacy single-symbol attribute kept for callers that read .symbol
+        self._symbol = self._symbols[0]
         self._on_bar = on_bar
         self._on_reconnect = on_reconnect
         self._paper = paper
         self._stop_event: Optional[asyncio.Event] = None
+        self._active_sdk_stream = None  # set while _run_forever is running
 
     def _build_stream(self):
         """Build a new StockDataStream instance."""
         from alpaca.data.live import StockDataStream
 
+        # This alpaca-py expects a DataFeed enum (it reads ``feed.value``);
+        # a bare "iex" string crashes in the SDK ctor.
+        try:
+            from alpaca.data.enums import DataFeed
+
+            feed = DataFeed.IEX
+        except ImportError:  # pragma: no cover - older SDKs accept the string
+            feed = "iex"
+
         return StockDataStream(
             api_key=self._api_key,
             secret_key=self._secret_key,
-            feed="iex",
+            feed=feed,
         )
 
     def _bar_to_minutebar(self, bar, is_update: bool = False) -> MinuteBar:
         """Convert alpaca-py Bar object to MinuteBar dataclass."""
-        ts = bar.timestamp
+        # Live WS bars carry a python datetime; coerce to pandas Timestamp so
+        # tz_localize/tz_convert are available (idempotent for Timestamps).
+        ts = pd.Timestamp(bar.timestamp)
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
         ts = ts.tz_convert("America/New_York")
@@ -110,18 +139,22 @@ class AlpacaBarStream:
                 mb = self._bar_to_minutebar(bar, is_update=True)
                 self._on_bar(mb)
 
-            stream.subscribe_bars(bar_handler, self._symbol)
+            stream.subscribe_bars(bar_handler, *self._symbols)
             # updated_bars is not a standard alpaca-py event — handle gracefully
             try:
-                stream.subscribe_updated_bars(updated_bar_handler, self._symbol)
+                stream.subscribe_updated_bars(updated_bar_handler, *self._symbols)
             except AttributeError:
                 logger.debug("subscribe_updated_bars not available on this alpaca-py version")
 
             try:
-                logger.info("Connecting to Alpaca WebSocket for %s", self._symbol)
+                logger.info("Connecting to Alpaca WebSocket for %s", self._symbols)
+                self._active_sdk_stream = stream
                 await stream._run_forever()
                 consecutive_failures = 0
                 logger.info("Stream ended cleanly.")
+                break
+            except asyncio.CancelledError:
+                logger.info("Bar stream task cancelled — shutting down.")
                 break
             except Exception as exc:
                 consecutive_failures += 1
@@ -144,6 +177,14 @@ class AlpacaBarStream:
                 consecutive_failures = 0  # reset after successful reconnect call
 
     async def stop(self) -> None:
-        """Signal the stream to stop after current iteration."""
+        """Stop the stream: close the SDK WebSocket and signal the loop to exit."""
         if self._stop_event is not None:
             self._stop_event.set()
+        # Close the underlying SDK stream so _run_forever() returns immediately
+        # rather than waiting for the next WS message.
+        if self._active_sdk_stream is not None:
+            try:
+                self._active_sdk_stream.stop()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("SDK stream stop raised: %s", exc)
+            self._active_sdk_stream = None

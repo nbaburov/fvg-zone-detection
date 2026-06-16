@@ -1,0 +1,58 @@
+{
+  "note": "LSTM regularisation ablation. Control = G2 weighted_ce (full reg). All ablations re-run with fixed checkpoint names (no_dropout/no_l2/no_reg suffix). Bug was: checkpoint name was identical to control, causing cache hit. Fixed in seed_sweep._checkpoint_name().",
+  "configs": {
+    "control": {
+      "dropout": 0.3175,
+      "head_dropout": 0.5262,
+      "weight_decay": "3.92e-5",
+      "mean_macro_f1": 0.6006,
+      "std_macro_f1": 0.027,
+      "source": "G2/multiseed_summary_lstm_weighted_ce.md"
+    },
+    "no_dropout": {
+      "dropout": 0.0,
+      "head_dropout": 0.0,
+      "weight_decay": "3.92e-5",
+      "per_seed": {
+        "0": 0.5532,
+        "17": 0.6036,
+        "42": 0.5961,
+        "123": 0.582,
+        "2024": 0.5795
+      },
+      "mean_macro_f1": 0.5829,
+      "std_macro_f1": 0.0173,
+      "delta_vs_control": -0.0177
+    },
+    "no_l2": {
+      "dropout": 0.3175,
+      "head_dropout": 0.5262,
+      "weight_decay": 0.0,
+      "per_seed": {
+        "0": 0.5828,
+        "17": 0.6164,
+        "42": 0.5776,
+        "123": 0.568,
+        "2024": 0.6172
+      },
+      "mean_macro_f1": 0.5924,
+      "std_macro_f1": 0.0205,
+      "delta_vs_control": -0.0082
+    },
+    "both_off": {
+      "dropout": 0.0,
+      "head_dropout": 0.0,
+      "weight_decay": 0.0,
+      "per_seed": {
+        "0": 0.596,
+        "17": 0.5699,
+        "42": 0.5912,
+        "123": 0.5745,
+        "2024": 0.5709
+      },
+      "mean_macro_f1": 0.5805,
+      "std_macro_f1": 0.0109,
+      "delta_vs_control": -0.0201
+    }
+  }
+}

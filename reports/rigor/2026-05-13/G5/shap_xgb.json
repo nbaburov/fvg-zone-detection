@@ -1,0 +1,29 @@
+{
+  "top_5_features": [
+    {
+      "feature": "ret_60",
+      "mean_abs_shap": 0.838471
+    },
+    {
+      "feature": "gap_norm_bull",
+      "mean_abs_shap": 0.814258
+    },
+    {
+      "feature": "gap_bear",
+      "mean_abs_shap": 0.700608
+    },
+    {
+      "feature": "pos_in_range",
+      "mean_abs_shap": 0.556108
+    },
+    {
+      "feature": "gap_norm_bear",
+      "mean_abs_shap": 0.51747
+    }
+  ],
+  "features_below_threshold": [
+    "vol_spike"
+  ],
+  "checkpoint": "checkpoints/xgboost/xgb_seed42.ubj",
+  "note": "Momentum (ret_60) and gap geometry (gap_norm_bull, gap_bear) dominate. vol_spike dropped as near-zero SHAP."
+}

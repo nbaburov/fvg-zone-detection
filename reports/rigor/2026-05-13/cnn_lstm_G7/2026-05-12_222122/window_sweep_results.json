@@ -1,0 +1,30 @@
+[
+  {
+    "window_size": 30,
+    "val_macro_f1": 0.593436521628011,
+    "test_macro_f1": 0.5329880038916424,
+    "n_test_windows": 5228,
+    "effective_n": 174
+  },
+  {
+    "window_size": 60,
+    "val_macro_f1": 0.5803463488603593,
+    "test_macro_f1": 0.5762823640385116,
+    "n_test_windows": 5198,
+    "effective_n": 86
+  },
+  {
+    "window_size": 90,
+    "val_macro_f1": 0.629705573446259,
+    "test_macro_f1": 0.5854184680628159,
+    "n_test_windows": 5168,
+    "effective_n": 57
+  },
+  {
+    "window_size": 120,
+    "val_macro_f1": 0.6076076536137204,
+    "test_macro_f1": 0.5587534955277024,
+    "n_test_windows": 5138,
+    "effective_n": 42
+  }
+]

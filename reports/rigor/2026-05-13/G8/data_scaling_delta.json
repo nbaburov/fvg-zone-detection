@@ -1,0 +1,16 @@
+{
+  "note": "G8 — Data scaling Δ. Reference Phase C artifact. No new compute. See baselines/data-scaling-delta.json.",
+  "source": "reports/rigor/2026-05-13/baselines/data-scaling-delta.json",
+  "lstm": {
+    "f1_old": 0.6019,
+    "f1_new": 0.5983,
+    "delta": -0.0036,
+    "interpretation": "Minimal drop (-0.004). Extended data 2015-2025 does not hurt vs 2018-2024."
+  },
+  "xgb": {
+    "f1_old": 0.5428,
+    "f1_new": 0.5294,
+    "delta": -0.0134,
+    "interpretation": "Small drop (-0.013). These are pre-Optuna baselines; G1 Optuna XGB (0.6908) far exceeds both."
+  }
+}

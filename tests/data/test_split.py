@@ -16,13 +16,13 @@ from src.data.split import temporal_split, SPLIT_BOUNDARIES
 
 def _make_full_dataset(seed: int = 42) -> pd.DataFrame:
     """
-    Synthetic H1 DataFrame spanning 2018–2024 with mock labels.
+    Synthetic H1 DataFrame spanning 2018–2025 with mock labels.
     One bar per calendar day (simplified — real data has many per day but
     this is enough to cover the split boundary logic).
     """
     rng = np.random.default_rng(seed)
-    # ~2000 trading days from 2018-01-02 to 2024-12-31
-    idx = pd.bdate_range("2018-01-02", "2024-12-31", freq="B", tz="America/New_York")
+    # trading days from 2018-01-02 to 2025-12-31 (covers test_end=2025-12-31)
+    idx = pd.bdate_range("2018-01-02", "2025-12-31", freq="B", tz="America/New_York")
     n = len(idx)
     prices = 400.0 + rng.normal(0, 1.0, n).cumsum() + 350.0
     df = pd.DataFrame(
@@ -77,7 +77,7 @@ def test_default_boundaries_produce_expected_date_ranges():
     assert val.index.min().year == 2022
     assert val.index.max().year == 2022
     assert test.index.min().year == 2023
-    assert test.index.max().year <= 2024
+    assert test.index.max().year <= 2025
 
 
 def test_raises_on_empty_split():

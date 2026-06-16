@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.data.labels.base import BaseLabeller
 from src.data.normalize import normalise_window
+from src.data.timeframe import H1, Timeframe
 from src.data.window import _has_session_gap
 from src.inspect.base import ModelAdapter
 
@@ -64,6 +65,7 @@ def run(
     stride: int = 1,
     drop_cross_session: bool = False,
     lookahead_bars: int = 0,
+    timeframe: Timeframe = H1,
 ) -> InspectionResults:
     """Run inference across all adapters on ``df_slice``.
 
@@ -85,6 +87,11 @@ def run(
         Skip windows that span session gaps (>90 min between consecutive bars).
         Default False — matches training configuration (SPY H1 60-bar windows
         always span overnight gaps; dropping them yields 0 windows).
+    timeframe : Timeframe
+        The bar timeframe being processed.  Controls the intra-window gap
+        threshold used by ``_has_session_gap`` when ``drop_cross_session`` is
+        True.  Defaults to ``H1`` (90 min gap threshold) — identical to the
+        previous hard-coded behaviour.
 
     Returns
     -------
@@ -117,7 +124,9 @@ def run(
         end = i + window_size
         if end > n_bars:
             break
-        if drop_cross_session and _has_session_gap(df_slice, i, end):
+        if drop_cross_session and _has_session_gap(
+            df_slice, i, end, timeframe.max_intra_window_gap_minutes
+        ):
             continue
 
         raw_w = ohlcv[i:end].astype(np.float32)       # (60, 5)

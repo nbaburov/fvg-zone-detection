@@ -1,0 +1,37 @@
+[
+  {
+    "window_size": 30,
+    "val_macro_f1": 0.5571158223160714,
+    "test_macro_f1": 0.5306155332524471,
+    "n_test_windows": 5228,
+    "effective_n": 174
+  },
+  {
+    "window_size": 45,
+    "val_macro_f1": 0.5783201054456115,
+    "test_macro_f1": 0.5361626832544824,
+    "n_test_windows": 5213,
+    "effective_n": 115
+  },
+  {
+    "window_size": 60,
+    "val_macro_f1": 0.6180129318779978,
+    "test_macro_f1": 0.6172557572108066,
+    "n_test_windows": 5198,
+    "effective_n": 86
+  },
+  {
+    "window_size": 90,
+    "val_macro_f1": 0.6488356696217424,
+    "test_macro_f1": 0.6327559219224501,
+    "n_test_windows": 5168,
+    "effective_n": 57
+  },
+  {
+    "window_size": 120,
+    "val_macro_f1": 0.656030230556092,
+    "test_macro_f1": 0.5794868975132775,
+    "n_test_windows": 5138,
+    "effective_n": 42
+  }
+]

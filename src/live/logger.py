@@ -4,6 +4,14 @@ Writes per-session data to logs/paper/<session-id>/. Three stores:
 - Parquet (bars_1m, bars_h1, predictions) — buffered, flushed on H1 close or close().
 - SQLite (orders, fills) — written immediately per event.
 - JSONL (equity, events) — written immediately per event.
+
+``FleetSessionLogger`` extends ``SessionLogger`` with:
+- Namespace isolation per ``(ticker, model, strategy)`` — each cell writes to
+  its own sub-directory under the session dir.
+- ``log_bar(bar, source)`` — logs a ``MinuteBar`` tagged with a ``source`` field
+  (``"live"`` or ``"backfill"``); used by ``RestBackfiller`` (WS-B).
+- ``log_intent(intent)`` — appends an ``OrderIntent`` to a per-cell JSONL file
+  (``intents.jsonl``) for deterministic offline replay (WS-G).
 """
 
 from __future__ import annotations
@@ -22,6 +30,9 @@ from src.live.stream import MinuteBar
 from src.live.window_builder import H1Bar, WindowEvent
 from src.live.decision import TradeAction
 
+# Imported lazily inside methods to avoid circular dependency at module level.
+# from src.live.order_plan import OrderIntent
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,6 +46,7 @@ class FillEvent:
     fill_qty: int
     fill_type: str  # "fill" | "partial_fill"
     side: str       # "buy" | "sell"
+    symbol: Optional[str] = None  # set in the fleet path so FillRouter can route by symbol
 
 
 class SessionLogger:
@@ -225,3 +237,232 @@ def _append_parquet(path: Path, rows: list[dict]) -> None:
         combined = new_df
 
     pq.write_table(pa.Table.from_pandas(combined), str(path))
+
+
+# ---------------------------------------------------------------------------
+# FleetSessionLogger
+# ---------------------------------------------------------------------------
+
+class FleetSessionLogger:
+    """Namespaced session logger for multi-model/strategy fleet sessions.
+
+    Wraps one ``SessionLogger`` per ``(ticker, model, strategy)`` cell, stored
+    in ``<base_dir>/<session_id>/<ticker>/<model>/<strategy>/``.
+
+    Additionally provides:
+    - ``log_bar(bar, source)`` — logs a ``MinuteBar`` tagged with a ``source``
+      field (``"live"`` or ``"backfill"``).  Used by ``RestBackfiller`` (WS-B)
+      and the live feed; written to a shared ``bars_1m_fleet.jsonl`` under the
+      session root so the replay script can reconstruct decision windows.
+    - ``log_intent(intent)`` — appends the ``OrderIntent`` dict (plus its cell
+      key) to ``intents.jsonl`` under the cell sub-directory.  WS-G reads this
+      file to replay-resolve P&L without a network connection.
+
+    Parameters
+    ----------
+    session_id : str
+        Unique session identifier.
+    base_dir : str
+        Root directory for all session logs.  Defaults to ``"logs/paper"``.
+
+    Intent JSONL schema (one JSON object per line in ``intents.jsonl``)
+    -------------------------------------------------------------------
+    ::
+
+        {
+          "ticker": "SPY",
+          "model": "cnn_lstm",
+          "strategy": "ict_iofed",
+          "h1_timestamp": "<ISO-8601>",
+          "direction": 1,
+          "signal": "bull",
+          "confidence": 0.72,
+          "entry": 452.30,
+          "sl": 451.00,
+          "tp": 454.90,
+          "entry_type": "limit",
+          "skip_reason": null
+        }
+
+    Bar JSONL schema (one JSON object per line in ``bars_1m_fleet.jsonl``)
+    ----------------------------------------------------------------------
+    ::
+
+        {
+          "symbol": "SPY",
+          "timestamp": "<ISO-8601>",
+          "open": 452.10,
+          "high": 452.50,
+          "low": 451.90,
+          "close": 452.30,
+          "volume": 12345.0,
+          "is_update": false,
+          "source": "backfill"
+        }
+    """
+
+    def __init__(self, session_id: str, base_dir: str = "logs/paper") -> None:
+        self._session_id = session_id
+        self._root = Path(base_dir) / session_id
+        self._root.mkdir(parents=True, exist_ok=True)
+
+        # Cell loggers keyed by (ticker, model, strategy)
+        self._cell_loggers: dict[tuple[str, str, str], SessionLogger] = {}
+
+        # Shared bar JSONL (all tickers, tagged by source)
+        self._bars_fh = open(self._root / "bars_1m_fleet.jsonl", "a", encoding="utf-8")
+
+        # Shared intent JSONL at root level (mirrors per-cell intents for easy grep)
+        self._intents_fh = open(self._root / "intents.jsonl", "a", encoding="utf-8")
+
+        logger.info("FleetSessionLogger initialised: %s", self._root)
+
+    # ------------------------------------------------------------------
+    # Cell-namespace helpers
+    # ------------------------------------------------------------------
+
+    def _cell_key(self, ticker: str, model: str, strategy: str) -> tuple[str, str, str]:
+        return (ticker, model, strategy)
+
+    def cell_logger(self, ticker: str, model: str, strategy: str) -> SessionLogger:
+        """Return (or lazily create) the ``SessionLogger`` for this cell."""
+        key = self._cell_key(ticker, model, strategy)
+        if key not in self._cell_loggers:
+            cell_dir = str(self._root / ticker / model / strategy)
+            self._cell_loggers[key] = SessionLogger(
+                session_id=f"{ticker}__{model}__{strategy}",
+                base_dir=str(self._root),
+            )
+            # Override the internal dir to the cell sub-path
+            cell_path = self._root / ticker / model / strategy
+            cell_path.mkdir(parents=True, exist_ok=True)
+            self._cell_loggers[key]._dir = cell_path  # type: ignore[attr-defined]
+        return self._cell_loggers[key]
+
+    # ------------------------------------------------------------------
+    # Fleet-level bar logging (shared across all tickers)
+    # ------------------------------------------------------------------
+
+    def log_bar(self, bar: MinuteBar, source: str = "live") -> None:
+        """Log a ``MinuteBar`` tagged with ``source`` (``"live"`` or ``"backfill"``).
+
+        Written to ``bars_1m_fleet.jsonl`` under the session root so that
+        ``replay_fleet`` can reconstruct every decision window offline.
+
+        Parameters
+        ----------
+        bar : MinuteBar
+            The 1-minute bar to record.
+        source : str
+            ``"live"`` for bars arriving from the WebSocket stream;
+            ``"backfill"`` for bars fetched by ``RestBackfiller`` at startup.
+        """
+        record = {
+            "symbol": bar.symbol,
+            "timestamp": bar.timestamp.isoformat(),
+            "open": bar.open,
+            "high": bar.high,
+            "low": bar.low,
+            "close": bar.close,
+            "volume": bar.volume,
+            "is_update": bar.is_update,
+            "source": source,
+        }
+        self._bars_fh.write(json.dumps(record) + "\n")
+        self._bars_fh.flush()
+
+    # ------------------------------------------------------------------
+    # Intent persistence (replay input for WS-G)
+    # ------------------------------------------------------------------
+
+    def log_intent(self, intent: "Any") -> None:  # Any = OrderIntent (lazy import)
+        """Append an ``OrderIntent`` to both the root ``intents.jsonl`` and the
+        per-cell ``intents.jsonl`` so ``replay_fleet`` can locate them by cell.
+
+        Parameters
+        ----------
+        intent : OrderIntent
+            The fully-resolved intent from ``StrategyOrderPlanner``.
+        """
+        import math
+
+        record = {
+            "ticker": intent.ticker,
+            "model": intent.model,
+            "strategy": intent.strategy,
+            "h1_timestamp": intent.h1_timestamp.isoformat(),
+            "direction": intent.direction,
+            "signal": intent.signal,
+            "confidence": intent.confidence,
+            "entry": None if (isinstance(intent.entry, float) and math.isnan(intent.entry)) else intent.entry,
+            "sl": None if (isinstance(intent.sl, float) and math.isnan(intent.sl)) else intent.sl,
+            "tp": None if (isinstance(intent.tp, float) and math.isnan(intent.tp)) else intent.tp,
+            "entry_type": intent.entry_type,
+            "skip_reason": intent.skip_reason,
+        }
+        line = json.dumps(record) + "\n"
+
+        # Root-level JSONL (all cells)
+        self._intents_fh.write(line)
+        self._intents_fh.flush()
+
+        # Per-cell JSONL
+        cell_dir = self._root / intent.ticker / intent.model / intent.strategy
+        cell_dir.mkdir(parents=True, exist_ok=True)
+        cell_intents = cell_dir / "intents.jsonl"
+        with open(cell_intents, "a", encoding="utf-8") as fh:
+            fh.write(line)
+
+    # ------------------------------------------------------------------
+    # Delegating wrappers for common per-cell operations
+    # ------------------------------------------------------------------
+
+    def log_prediction(
+        self,
+        ticker: str,
+        model: str,
+        strategy: str,
+        event: "Any",
+        action: "Any",
+    ) -> None:
+        """Delegate to the cell logger's ``log_prediction``."""
+        self.cell_logger(ticker, model, strategy).log_prediction(event, action)
+
+    def log_order(
+        self,
+        ticker: str,
+        model: str,
+        strategy: str,
+        order_id: str,
+        action: "Any",
+        qty: int,
+        sl: float,
+        tp: float,
+    ) -> None:
+        """Delegate to the cell logger's ``log_order``."""
+        self.cell_logger(ticker, model, strategy).log_order(
+            order_id, action, qty, sl, tp, symbol=ticker
+        )
+
+    def log_event(self, event_type: str, payload: dict) -> None:
+        """Write a fleet-level event to the session root ``events.jsonl``."""
+        events_path = self._root / "events.jsonl"
+        record = {
+            "timestamp": pd.Timestamp.now(tz="America/New_York").isoformat(),
+            "event_type": event_type,
+            "payload": payload,
+        }
+        with open(events_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def close(self) -> None:
+        """Flush all cell loggers and close fleet-level file handles."""
+        for cell_log in self._cell_loggers.values():
+            cell_log.close()
+        self._bars_fh.close()
+        self._intents_fh.close()
+        logger.info("FleetSessionLogger closed: %s", self._root)

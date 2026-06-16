@@ -1,0 +1,18 @@
+{
+  "d_model": 64,
+  "nhead": 4,
+  "num_layers": 1,
+  "dim_feedforward": 128,
+  "dropout": 0.2218455076693483,
+  "head_dropout": 0.14883605700319194,
+  "lr": 0.0023359635026261607,
+  "weight_decay": 2.091498132903561e-05,
+  "warmup_steps": 100,
+  "pool": "mean",
+  "batch_size": 16,
+  "val_macro_f1": 0.5643818742279061,
+  "trial_number": 2,
+  "n_trials_completed": 31,
+  "study_name": "transformer_fvg",
+  "storage": "/Users/nickb/Documents/Study/University/3rdYear/Sem6/Individual/smc-data-challenge/checkpoints/transformer/optuna_2026-06-07.db"
+}

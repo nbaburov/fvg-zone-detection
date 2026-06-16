@@ -22,11 +22,8 @@ _CTOR_PARAMS = set(inspect.signature(FVGTransformerClassifier.__init__).paramete
 class TransformerAdapter(ModelAdapter):
     """Wraps a trained FVGTransformerClassifier for inspection inference.
 
-    ``checkpoint_dir`` must be the PARENT of the ``transformer/`` subdir (the
-    adapter resolves ``checkpoint_dir/"transformer"/<file>``), e.g. pass
-    ``checkpoints/`` for the seed-sweep set or
-    ``checkpoints/transformer_multisym/`` for a multisym set that nests
-    ``transformer/``.
+    Bare-name default: resolves ``checkpoint_dir/"transformer_h1_spy"/<file>``.
+    Pass an explicit ``checkpoint_path=`` to load from any path directly.
 
     Windows are expected to be NORMALISED (N, 60, 5) float32 — the same
     normalisation applied during training via ``normalise_window``.
@@ -51,13 +48,16 @@ class TransformerAdapter(ModelAdapter):
             checkpoint_path = Path(checkpoint_path)
         else:
             checkpoint_dir = Path(checkpoint_dir)
-            checkpoint_path = checkpoint_dir / "transformer" / checkpoint_file
+            checkpoint_path = checkpoint_dir / "transformer_h1_spy" / checkpoint_file
         if not checkpoint_path.exists():
             raise FileNotFoundError(
                 f"Transformer checkpoint not found: {checkpoint_path}. "
-                "Pass checkpoint_dir as the parent of the 'transformer/' subdir "
-                "(e.g. checkpoints/ for the seed-sweep set)."
+                "Pass checkpoint_dir as the root checkpoints/ directory or "
+                "supply checkpoint_path= directly."
             )
+
+        # Resolved checkpoint path — exposed for post-load TF validation (H2).
+        self.checkpoint_path = checkpoint_path
 
         # Read HP from meta sidecar so architecture matches checkpoint
         meta_path = checkpoint_path.with_suffix(".meta.json")

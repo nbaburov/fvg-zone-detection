@@ -1,0 +1,46 @@
+{
+  "weighted_ce_baseline": {
+    "mean_macro_f1": 0.6006,
+    "std_macro_f1": 0.027,
+    "source": "G2 LSTM multiseed (5 seeds, weighted_ce)"
+  },
+  "focal_gamma_1": {
+    "mean_macro_f1": 0.537,
+    "std_macro_f1": 0.0277,
+    "per_seed": {
+      "0": 0.5646,
+      "17": 0.5086,
+      "42": 0.5475,
+      "123": 0.4996,
+      "2024": 0.5647
+    },
+    "delta_vs_baseline": -0.0636
+  },
+  "focal_gamma_2": {
+    "mean_macro_f1": 0.5065,
+    "std_macro_f1": 0.0107,
+    "per_seed": {
+      "0": 0.5089,
+      "17": 0.516,
+      "42": 0.4864,
+      "123": 0.515,
+      "2024": 0.5062
+    },
+    "delta_vs_baseline": -0.0941
+  },
+  "focal_gamma_3": {
+    "mean_macro_f1": 0.4913,
+    "std_macro_f1": 0.0347,
+    "per_seed": {
+      "0": 0.4524,
+      "17": 0.4469,
+      "42": 0.5178,
+      "123": 0.5091,
+      "2024": 0.5304
+    },
+    "delta_vs_baseline": -0.1093
+  },
+  "best_gamma": "weighted_ce (baseline is best)",
+  "conclusion": "Focal loss uniformly hurts performance vs weighted CE. All gamma values degrade mean F1. Weighted CE remains the recommended loss.",
+  "verification": "15/15 seeds verified (5 per gamma). All HP match G1 best (hidden=128, layers=1, dropout=0.318, head_dropout=0.526, lr=5.30e-4)."
+}

@@ -1,0 +1,15 @@
+{
+  "splits": "default",
+  "majority_class": {
+    "macro_f1": 0.32802371412749604,
+    "none_f1": 0.984071142382488,
+    "bull_f1": 0.0,
+    "bear_f1": 0.0,
+    "majority_class": 0
+  },
+  "uniform_random": {
+    "macro_f1_mean": 0.1851162414478781,
+    "macro_f1_std": 0.003568579723161907,
+    "n_samples": 1000
+  }
+}

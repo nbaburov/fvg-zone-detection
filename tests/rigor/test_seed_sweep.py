@@ -92,8 +92,8 @@ def test_from_experiment_config_output_dir_override(tmp_path: Path) -> None:
 
 
 def test_from_experiment_config_xgb() -> None:
-    """from_experiment_config maps xgb_g1.yaml arch correctly."""
-    cfg = load_experiment("experiments/xgb_g1.yaml")
+    """from_experiment_config maps xgboost_g1.yaml arch correctly."""
+    cfg = load_experiment("experiments/xgboost_g1.yaml")
     sweep = SeedSweepConfig.from_experiment_config(cfg)
     assert sweep.model_type == "xgb"
     assert sweep.hyperparams["n_estimators"] == cfg.model.n_estimators
@@ -149,8 +149,8 @@ def test_run_seed_sweep_checkpoint_skip(tmp_path: Path) -> None:
         checkpoint_dir=tmp_path / "checkpoints",
     )
 
-    # Pre-write a valid meta for seed 42
-    ckpt_dir = tmp_path / "checkpoints" / "lstm"
+    # Pre-write a valid meta for seed 42 — new flat scheme: lstm_h1_spy
+    ckpt_dir = tmp_path / "checkpoints" / "lstm_h1_spy"
     ckpt_dir.mkdir(parents=True)
     meta_path = ckpt_dir / "lstm_seed42.meta.json"
     meta = {
@@ -180,3 +180,133 @@ def _write_fake_meta(meta_path: Path, seed: int) -> None:
     }
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     meta_path.write_text(json.dumps(meta))
+
+
+# ---------------------------------------------------------------------------
+# H1: _train_lstm honors swept window_size (was hardcoded 60)
+# ---------------------------------------------------------------------------
+
+def test_train_lstm_honors_window_size_from_hyperparams(tmp_path: Path) -> None:
+    """_train_lstm must build SMCWindowDataset with the swept window_size, not 60.
+
+    Patches SMCWindowDataset to a sentinel that captures its window_size kwarg
+    and short-circuits the rest of training. Mirrors the accessor used by
+    _train_cnn_lstm / _train_torch_generic: int(hp.get("window_size", 60)).
+    """
+    from src.rigor.seed_sweep import SeedSweepConfig, _train_lstm
+
+    captured: list[int] = []
+
+    class _Sentinel(Exception):
+        pass
+
+    def _fake_dataset(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured.append(kwargs["window_size"])
+        raise _Sentinel  # stop before the (heavy) training loop
+
+    cfg = SeedSweepConfig(
+        model_type="lstm",
+        hyperparams={"window_size": 40},
+        seeds=[0],
+        data_dir=tmp_path,
+    )
+
+    import pandas as _pd
+
+    with patch(
+        "src.rigor.seed_sweep._load_splits",
+        return_value=(_pd.DataFrame(), _pd.DataFrame(), _pd.DataFrame()),
+    ), patch("src.data.window.SMCWindowDataset", side_effect=_fake_dataset):
+        with pytest.raises(_Sentinel):
+            _train_lstm(cfg, seed=0, ckpt_path=tmp_path / "c.pt", meta_path=tmp_path / "m.json")
+
+    assert captured, "SMCWindowDataset was never constructed"
+    assert all(ws == 40 for ws in captured), (
+        f"_train_lstm ignored window_size; built datasets with {captured} (expected all 40)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# train_stride — configurable train stride, val/test stay stride=1
+# ---------------------------------------------------------------------------
+
+def test_seed_sweep_config_train_stride_default() -> None:
+    """SeedSweepConfig.train_stride defaults to 1 (H1 backward-compat)."""
+    cfg = SeedSweepConfig(model_type="lstm", hyperparams={}, seeds=[42])
+    assert cfg.train_stride == 1
+
+
+def test_from_experiment_config_train_stride_from_data_stride() -> None:
+    """from_experiment_config populates train_stride from cfg.data.stride."""
+    cfg = load_experiment("experiments/lstm_5m.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg)
+    # lstm_5m.yaml sets data.stride: 9
+    assert sweep.train_stride == 9
+
+
+def test_from_experiment_config_train_stride_h1_default() -> None:
+    """H1 YAML (no data.stride key) → train_stride=1 (DataConfig default)."""
+    cfg = load_experiment("experiments/lstm_g1.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg)
+    assert sweep.train_stride == 1
+
+
+def test_from_experiment_config_15m_stride() -> None:
+    """15m YAML sets data.stride: 3 → train_stride=3."""
+    cfg = load_experiment("experiments/lstm_15m.yaml")
+    sweep = SeedSweepConfig.from_experiment_config(cfg)
+    assert sweep.train_stride == 3
+
+
+def test_train_lstm_uses_train_stride_for_train_only(tmp_path: Path) -> None:
+    """_train_lstm builds TRAIN dataset with config.train_stride, VAL/TEST with stride=1.
+
+    Patches SMCWindowDataset, captures stride kwarg per call (train=first, val=second,
+    test=third), then raises to short-circuit the loop. Asserts train gets train_stride
+    and val/test get 1.
+    """
+    from src.rigor.seed_sweep import _train_lstm
+
+    stride_calls: list[int] = []
+
+    class _Sentinel(Exception):
+        pass
+
+    def _fake_dataset(*args, **kwargs):  # noqa: ANN002, ANN003
+        stride_calls.append(kwargs.get("stride", 1))
+        if len(stride_calls) >= 3:
+            raise _Sentinel
+
+    cfg = SeedSweepConfig(
+        model_type="lstm",
+        hyperparams={"window_size": 60},
+        seeds=[0],
+        data_dir=tmp_path,
+        train_stride=5,
+    )
+
+    import pandas as _pd
+
+    with patch(
+        "src.rigor.seed_sweep._load_splits",
+        return_value=(_pd.DataFrame(), _pd.DataFrame(), _pd.DataFrame()),
+    ), patch("src.data.window.SMCWindowDataset", side_effect=_fake_dataset):
+        with pytest.raises(_Sentinel):
+            _train_lstm(cfg, seed=0, ckpt_path=tmp_path / "c.pt", meta_path=tmp_path / "m.json")
+
+    assert len(stride_calls) == 3, f"Expected 3 dataset constructions, got {len(stride_calls)}"
+    assert stride_calls[0] == 5, f"TRAIN stride should be train_stride=5, got {stride_calls[0]}"
+    assert stride_calls[1] == 1, f"VAL stride should be 1, got {stride_calls[1]}"
+    assert stride_calls[2] == 1, f"TEST stride should be 1, got {stride_calls[2]}"
+
+
+def test_5m_yaml_loads_with_stride_9() -> None:
+    """cnn_lstm_5m.yaml parses cleanly and has data.stride=9."""
+    cfg = load_experiment("experiments/cnn_lstm_5m.yaml")
+    assert cfg.data.stride == 9
+
+
+def test_15m_yaml_loads_with_stride_3() -> None:
+    """transformer_15m.yaml parses cleanly and has data.stride=3."""
+    cfg = load_experiment("experiments/transformer_15m.yaml")
+    assert cfg.data.stride == 3
