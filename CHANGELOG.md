@@ -4,6 +4,37 @@ All notable changes to the SMC Data Challenge. Format: [Keep a Changelog](https:
 
 No SemVer releases tagged yet — sections are dated working-tree milestones (newest first). Consolidated from per-session logs formerly under `.nb/changelogs/`.
 
+## [2026-06-17] - Presentation demo animator + final-delivery materials
+
+The presentation layer for the June final delivery: an interactive demo plus the
+deck, report, and presenter aids. No model or data-pipeline logic changed.
+
+### Added
+- **Demo animator** (`src/demo/` + `scripts/demo_animator.py`): a self-contained,
+  offline ECharts HTML that replays a real held-out SPY hourly window bar-by-bar
+  across the four best-per-arch models (XGBoost, CNN-LSTM, LSTM, Transformer). FVG
+  zones are colored by direction (green bullish, red bearish) with outcome badges
+  (check = held, cross = failed, question = no outcome), a per-model results modal
+  showing held-rate and average confidence, time-axis zoom, and a resolution tail so
+  gaps detected near the window end still resolve on screen. A single wide inference
+  pass is sliced into four scenes (good, xgboost-edge, cnn-lstm-edge, bad) that
+  contrast XGBoost vs CNN-LSTM head-to-head. Vendored ECharts is gitignored; playback
+  needs no network.
+  - `predict.py` (reuses inspect runner/outcomes/multisym), `serialize.py`
+    (build_demo_payload + build_multi_scene_payload), `render.py` (inlines payload +
+    vendored ECharts), `templates/demo.html` (the JS driver).
+  - `tests/demo/` (serialize + predict). Suite now 1092 (1082 main + 10 isolated
+    XGBoost), zero skips.
+- **Presentation deliverables** under `docs/presenation/`: `deck.html` (13-slide
+  self-contained deck), `content.md` (talk script), `presenter-notes.md` (presenter
+  cheat-sheet with per-model cards and a Q&A bank). `docs/report/` adds the two-page
+  report (`2pager.tex` / `.pdf`) and its figures.
+
+### Changed
+- Docs synced for the demo and presentation: `CLAUDE.md`, `README.md`,
+  `docs/architecture.md` (demo package + CLI + artifact rows, presentation index,
+  test count 1092), `.gitignore` (ignore `src/demo/vendor/`).
+
 ## [2026-06-16] - Repository standardization, lower-timeframe + multi-symbol results, licensing
 
 A large consolidation commit. Two threads land together: the feature work since the

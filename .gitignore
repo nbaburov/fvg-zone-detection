@@ -70,3 +70,6 @@ reports/**/*.html
 reports/**/*.npz
 reports/**/*.parquet
 reports/**/plots/
+
+# --- Demo animator (vendored JS, fetched at build time, not committed) ---
+src/demo/vendor/

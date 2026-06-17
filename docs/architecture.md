@@ -108,6 +108,12 @@ smc-data-challenge/
 │       ├── logger.py              # writes bars (parquet), trades (sqlite), events (jsonl) per session
 │       └── replay.py              # replays a logged session deterministically for debugging
 │
+├── demo/                          # presentation demo backend (builds the offline FVG-replay HTML)
+│   ├── predict.py                 # reuses inspect runner/outcomes/multisym to get per-model trades
+│   ├── serialize.py               # build_demo_payload + build_multi_scene_payload (JSON for the JS driver)
+│   ├── render.py                  # inlines vendored ECharts + payload into one self-contained HTML
+│   └── templates/demo.html        # ECharts multi-grid animated bar-by-bar replay + scene picker
+│
 ├── scripts/                       # CLI entry points (not imported by src/)
 │   ├── data/                      # one-off data utilities
 │   │   ├── annotate_gold_set.py   # interactive Plotly tool for building the gold validation set
@@ -161,7 +167,7 @@ smc-data-challenge/
 │   ├── 06-status-update-2.ipynb   # + .html rendered export
 │   └── 07-status-update-2-presentation.ipynb  # + .slides.html
 │
-├── tests/                         # pytest - mirrors src/ layout (about 1040 tests, zero skips)
+├── tests/                         # pytest - mirrors src/ layout (about 1092 tests, zero skips)
 │   ├── data/                      # pipeline, labels, windowing, lookahead assertion fixture
 │   ├── models/                    # per-arch forward-pass smoke tests
 │   ├── training/                  # loss, early stop, seeding
@@ -170,7 +176,8 @@ smc-data-challenge/
 │   ├── inspect/                   # adapter, registry, runner, stats
 │   ├── strategy/                  # FVG exit strategies, realism guards
 │   ├── features/                  # window feature extraction
-│   └── live/                      # stream, window_builder, decision, executor, fleet
+│   ├── live/                      # stream, window_builder, decision, executor, fleet
+│   └── demo/                      # serialize payload + predict track tests
 │
 ├── checkpoints/                   # trained weights (gitignored)
 │   └── {arch}_{tf}_{dataset}[_tuned]/   # e.g. cnn_lstm_h1_spy/, xgboost_h1_multisym/, cnn_lstm_15m_multisym_tuned/
@@ -390,6 +397,7 @@ Grouped into subdirs: `tune/`, `sweeps/`, `stats/`, `eval/`, `pipelines/`, `_wor
 |--------|--------------|
 | `scripts/inspect_models.py` | Loads one or more checkpoints, runs test-set inference, simulates exits via `src/strategy`, writes HTML report. Supports `name:path` checkpoint syntax, `--all-exit-strategies`, `--realistic`, `--all-seeds`, `--confidence-sweep`. |
 | `scripts/paper_trade.py` | Connects to Alpaca WebSocket, builds H1 windows in real time, and paper-trades via bracket orders. Run one process per model. |
+| `scripts/demo_animator.py` | Builds the presentation demo: a self-contained offline ECharts HTML replaying held-out SPY windows bar-by-bar across all four H1 models, with held/failed/no-outcome badges, a per-model stats box, and a 4-scene picker. Writes `reports/demo/fvg_animation.html`. |
 
 ## Tools and external services
 
@@ -410,5 +418,6 @@ Grouped into subdirs: `tune/`, `sweeps/`, `stats/`, `eval/`, `pipelines/`, `_wor
 |----------|------|
 | Trained weights | `checkpoints/{arch}_{tf}_{dataset}[_tuned]/{arch}_seed{N}.pt` (torch) or `xgb_seed{N}.ubj` (XGBoost) + matching `.meta.json` |
 | Inspector report | `reports/inspect/<timestamp>/summary.md` + `plots/*.html` |
+| Presentation demo | `reports/demo/fvg_animation.html` (self-contained offline ECharts replay) |
 | Rigor outputs | `reports/rigor/<date>/<topic>.{md,json}` |
 | Live session log | `logs/paper/<session-id>/{bars.parquet, events.jsonl, trades.sqlite}` |

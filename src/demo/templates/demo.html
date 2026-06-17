@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SMC Fair Value Gap Detection: Bar-by-Bar Model Replay</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #fafafa;
+    color: #222;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  #header {
+    padding: 10px 20px 6px;
+    background: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+  }
+  #header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1a1a1a;
+    letter-spacing: 0.02em;
+  }
+  #header p {
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
+  }
+
+  #scene-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 20px;
+    background: #f0f4ff;
+    border-bottom: 1px solid #d0d8f0;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #scene-bar .scene-label {
+    font-size: 11px;
+    color: #555;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  #scene-bar button {
+    background: #ffffff;
+    color: #333;
+    border: 1px solid #b0bcdc;
+    border-radius: 5px;
+    padding: 4px 14px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    white-space: nowrap;
+  }
+  #scene-bar button:hover { background: #e4eaff; border-color: #7a96d8; }
+  #scene-bar button.active { background: #1565c0; border-color: #1565c0; color: #fff; }
+
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 20px;
+    background: #f5f5f5;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #controls button {
+    background: #ffffff;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 4px 14px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  #controls button:hover { background: #ebebeb; border-color: #aaa; }
+  #controls button.active { background: #1565c0; border-color: #1565c0; color: #fff; }
+
+  #speed-label { font-size: 11px; color: #666; }
+  .speed-btn { min-width: 42px; }
+
+  #scrub-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 160px;
+  }
+  #scrub {
+    flex: 1;
+    accent-color: #1565c0;
+    cursor: pointer;
+  }
+  #frame-counter {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+    min-width: 70px;
+    text-align: right;
+  }
+
+  #charts-wrap {
+    flex: 1 1 auto;
+    position: relative;
+    min-height: 480px;
+    height: calc(100vh - 210px);
+  }
+  #chart {
+    width: 100%;
+    height: 100%;
+  }
+
+  #legend {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 5px 20px;
+    background: #ffffff;
+    border-top: 1px solid #e8e8e8;
+    border-bottom: 1px solid #e8e8e8;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    font-size: 10px;
+    color: #555;
+  }
+  .legend-label {
+    font-size: 10px;
+    color: #888;
+    font-weight: 600;
+    margin-right: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .legend-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  #footer {
+    padding: 5px 20px;
+    background: #fafafa;
+    border-top: 1px solid #ebebeb;
+    font-size: 10px;
+    color: #999;
+    flex-shrink: 0;
+    text-align: center;
+  }
+
+  /* ---- Results modal ---- */
+  #modal-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+  #modal-backdrop.open {
+    display: flex;
+  }
+  #modal-box {
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+    width: min(96vw, 1180px);
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 0;
+    position: relative;
+  }
+  #modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid #e8e8e8;
+    flex-shrink: 0;
+  }
+  #modal-header h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1a1a1a;
+    letter-spacing: 0.01em;
+  }
+  #modal-close-x {
+    background: none;
+    border: none;
+    font-size: 18px;
+    line-height: 1;
+    color: #888;
+    cursor: pointer;
+    padding: 0 2px;
+    font-family: inherit;
+    transition: color 0.12s;
+  }
+  #modal-close-x:hover { color: #333; }
+  #modal-body {
+    padding: 12px 18px 16px;
+  }
+  #modal-footer-row {
+    padding: 8px 18px 14px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  #modal-close-btn {
+    background: #f5f5f5;
+    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    padding: 5px 18px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  #modal-close-btn:hover { background: #e0e0e0; border-color: #aaa; }
+
+  /* Stats table inside modal */
+  #stats-table-wrap {
+    overflow-x: auto;
+  }
+  #stats-table-wrap .stats-title {
+    display: none;
+  }
+  #stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+  }
+  #stats-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    color: #777;
+    padding: 3px 8px;
+    border-bottom: 1px solid #e0e0e0;
+    white-space: nowrap;
+  }
+  #stats-table th:not(:first-child) {
+    text-align: right;
+  }
+  #stats-table td {
+    padding: 3px 8px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #333;
+    white-space: nowrap;
+  }
+  #stats-table td:not(:first-child) {
+    text-align: right;
+  }
+  #stats-table tr:last-child td {
+    border-bottom: none;
+  }
+  #stats-table tr.best-held {
+    background: #f0faf3;
+  }
+  #stats-table tr.best-held td {
+    font-weight: 600;
+    color: #1a6b38;
+  }
+  #stats-table tr.best-held td:first-child {
+    font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>SMC Fair Value Gap Detection: Bar-by-Bar Model Replay</h1>
+  <p id="window-label">Loading...</p>
+</div>
+
+<div id="scene-bar">
+  <span class="scene-label">Scene:</span>
+  <div id="scene-buttons"></div>
+</div>
+
+<div id="controls">
+  <button id="btn-play" onclick="togglePlay()">&#9654; Play</button>
+  <button onclick="restart()">&#8635; Restart</button>
+  <span id="speed-label">Speed:</span>
+  <button class="speed-btn" onclick="setSpeed(0.5)">0.5x</button>
+  <button class="speed-btn active" id="spd-1" onclick="setSpeed(1)">1x</button>
+  <button class="speed-btn" onclick="setSpeed(2)">2x</button>
+  <button class="speed-btn" onclick="setSpeed(4)">4x</button>
+  <button id="btn-results" onclick="openModal()">Results</button>
+  <button id="btn-reset-zoom" onclick="resetZoom()">Reset zoom</button>
+  <div id="scrub-wrap">
+    <input type="range" id="scrub" min="0" value="0" oninput="scrubTo(parseInt(this.value))"/>
+    <span id="frame-counter">0 / 0</span>
+  </div>
+</div>
+
+<div id="legend">
+  <span class="legend-label">Legend:</span>
+  <span class="legend-item">
+    <span class="legend-swatch" style="background:rgba(0,160,60,0.10);border:1.5px dashed #2e9e5b;"></span>
+    Green = bullish gap
+  </span>
+  <span class="legend-item">
+    <span class="legend-swatch" style="background:rgba(210,45,45,0.10);border:1.5px dashed #d43333;"></span>
+    Red = bearish gap
+  </span>
+  <span class="legend-item" style="gap:4px;">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#2e9e5b;font-size:10px;font-weight:bold;color:#fff;flex-shrink:0;">&#10003;</span>
+    Check = gap held (price respected it)
+  </span>
+  <span class="legend-item" style="gap:4px;">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#d43333;font-size:10px;font-weight:bold;color:#fff;flex-shrink:0;">&#10007;</span>
+    Cross = gap failed (broke through)
+  </span>
+  <span class="legend-item" style="gap:4px;">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(120,120,120,0.9);font-size:10px;font-weight:bold;color:#fff;flex-shrink:0;">?</span>
+    ? = no outcome in window
+  </span>
+  <span style="font-size:10px;color:#aaa;">Faded = forming (outcome pending)</span>
+</div>
+
+<div id="charts-wrap">
+  <div id="chart"></div>
+</div>
+
+<div id="footer"></div>
+
+<!-- Results modal (hidden by default; opens via Results button or auto on scene end) -->
+<div id="modal-backdrop" onclick="handleBackdropClick(event)">
+  <div id="modal-box" onclick="event.stopPropagation()">
+    <div id="modal-header">
+      <h2>Per-model results (this scene)</h2>
+      <button id="modal-close-x" onclick="closeModal()" title="Close">&#x2715;</button>
+    </div>
+    <div id="modal-body">
+      <div id="stats-table-wrap">
+        <div class="stats-title">Per-model results (this scene)</div>
+        <table id="stats-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Found</th>
+              <th>Bullish</th>
+              <th>Bearish</th>
+              <th>Held (check)</th>
+              <th>Failed (cross)</th>
+              <th>No outcome</th>
+              <th>Held rate</th>
+              <th>Avg confidence</th>
+            </tr>
+          </thead>
+          <tbody id="stats-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="modal-footer-row">
+      <button id="modal-close-btn" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Inline ECharts library
+// ============================================================
+{{ECHARTS_JS}}
+</script>
+
+<script>
+// ============================================================
+// Precomputed payload (injected at build time)
+// ============================================================
+const PAYLOAD = {{PAYLOAD_JSON}};
+
+// ============================================================
+// Constants - zone color scheme
+// ============================================================
+// HUE = direction always: green for bullish, red for bearish.
+// Intensity encodes phase; outcome is shown via markPoint badges (check/cross/?).
+const COLOR_BULL_FORMING  = 'rgba(0, 160, 60, 0.10)';   // bullish forming: faint green fill
+const COLOR_BEAR_FORMING  = 'rgba(210, 45, 45, 0.10)';  // bearish forming: faint red fill
+const COLOR_BULL_HELD     = 'rgba(0, 160, 60, 0.40)';   // bullish TP: solid green fill
+const COLOR_BEAR_HELD     = 'rgba(210, 45, 45, 0.40)';  // bearish TP: solid red fill
+const COLOR_BULL_FAILED   = 'rgba(0, 160, 60, 0.18)';   // bullish SL: medium green fill
+const COLOR_BEAR_FAILED   = 'rgba(210, 45, 45, 0.18)';  // bearish SL: medium red fill
+const COLOR_BULL_TIMEOUT  = 'rgba(0, 160, 60, 0.18)';   // timeout bull: medium green (dir hue)
+const COLOR_BEAR_TIMEOUT  = 'rgba(210, 45, 45, 0.18)';  // timeout bear: medium red (dir hue)
+const BORDER_BULL         = '#2e9e5b';   // green border hue
+const BORDER_BEAR         = '#d43333';   // red border hue
+const MARKER_TP_COLOR     = '#2e9e5b';   // check badge fill
+const MARKER_SL_COLOR     = '#d43333';   // cross badge fill
+const MARKER_TIMEOUT_COLOR = 'rgba(120, 120, 120, 0.9)'; // grey ? badge fill
+
+// ============================================================
+// Playback state
+// ============================================================
+let currentFrame = 0;
+let playing = false;
+let speedMultiplier = 1.0;
+let intervalId = null;
+let endShown = false;   // auto-open-on-scene-end guard: fires once per scene playthrough
+const FRAME_MS = 250;   // ms between frame advances at 1x (~16s for 65 bars)
+
+// ============================================================
+// Modal controls
+// ============================================================
+function openModal() {
+  document.getElementById('modal-backdrop').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.remove('open');
+}
+
+function handleBackdropClick(e) {
+  // Close when clicking the translucent backdrop (not the modal box itself)
+  if (e.target === document.getElementById('modal-backdrop')) {
+    closeModal();
+  }
+}
+
+// ============================================================
+// Scene-derived globals (recomputed by loadScene)
+// ============================================================
+let ALL_CATS = [];
+let frameTimes = [];
+let nFrames = 0;
+let models = [];
+let nModels = 0;
+let modelBarMaps = [];
+let modelYRanges = [];
+
+// ============================================================
+// Chart init
+// ============================================================
+const chartDom = document.getElementById('chart');
+const chart = echarts.init(chartDom, null, { renderer: 'canvas' });
+
+// ============================================================
+// Scene button row
+// ============================================================
+function _sceneButtonLabel(scene) {
+  const s = scene.stats;
+  return scene.label + ' (' + s.tp + ' held, ' + s.sl + ' failed)';
+}
+
+function _buildSceneButtons() {
+  const wrap = document.getElementById('scene-buttons');
+  wrap.innerHTML = '';
+  PAYLOAD.scenes.forEach(function(scene, idx) {
+    const btn = document.createElement('button');
+    btn.id = 'scene-btn-' + idx;
+    btn.textContent = _sceneButtonLabel(scene);
+    btn.style.marginRight = '6px';
+    btn.onclick = function() { loadScene(idx); };
+    wrap.appendChild(btn);
+  });
+}
+
+function _updateSceneButtonActive(idx) {
+  PAYLOAD.scenes.forEach(function(_scene, i) {
+    const btn = document.getElementById('scene-btn-' + i);
+    if (btn) btn.classList.toggle('active', i === idx);
+  });
+}
+
+// ============================================================
+// loadScene: switch to scene idx; rebuild chart; reset to frame 0 + autoplay
+// ============================================================
+function loadScene(idx) {
+  stopPlay();
+  closeModal();
+  endShown = false;
+
+  const scene = PAYLOAD.scenes[idx];
+
+  // Recompute scene-derived globals
+  frameTimes = scene.frame_times;
+  nFrames = frameTimes.length;
+  models = scene.models;
+  nModels = models.length;
+
+  ALL_CATS = frameTimes.map(function(t) { return String(t); });
+
+  modelBarMaps = models.map(function(m) {
+    const map = new Map();
+    m.bars.forEach(function(b) { map.set(String(b.t), b); });
+    return map;
+  });
+
+  modelYRanges = models.map(function(m) {
+    let lo = Infinity, hi = -Infinity;
+    m.bars.forEach(function(b) {
+      if (b.l < lo) lo = b.l;
+      if (b.h > hi) hi = b.h;
+    });
+    const pad = (hi - lo) * 0.03;
+    return { min: lo - pad, max: hi + pad };
+  });
+
+  // Update footer
+  document.getElementById('footer').textContent = scene.footer;
+
+  // Update scrub max
+  document.getElementById('scrub').max = nFrames - 1;
+
+  // Update scene button active state
+  _updateSceneButtonActive(idx);
+
+  // Rebuild chart with new option (notMerge resets everything)
+  chart.setOption(buildInitialOption(), { notMerge: true });
+
+  // Reset to frame 0 and autoplay
+  currentFrame = 0;
+  renderFrame(0);
+  updateStatsTable(frameTimes[0]);
+  startPlay();
+}
+
+// ============================================================
+// Format helpers
+// ============================================================
+function fmtCatLabel(epochMs) {
+  const d = new Date(epochMs);
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short', day: 'numeric'
+  });
+}
+
+function fmtTime(epochMs) {
+  const d = new Date(epochMs);
+  return d.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+}
+
+// ============================================================
+// Build static option (grids, axes, empty series) - called on each scene load
+// ============================================================
+function buildInitialOption() {
+  const nG = nModels;
+  // Reserve 10% of chart height at the bottom for the dataZoom slider.
+  // Grid panels share the top 90%; small inter-panel gaps keep panels distinct.
+  const sliderReserve = 0.10;   // fraction reserved for zoom slider
+  const gridAreaH = 1.0 - sliderReserve;
+  const gapFrac = 0.014;
+  const totalH = gridAreaH - gapFrac * (nG - 1);
+  const cellH = totalH / nG;
+
+  const grids = [];
+  const xAxes = [];
+  const yAxes = [];
+  const series = [];
+
+  for (let gi = 0; gi < nG; gi++) {
+    const topFrac = gi * (cellH + gapFrac);
+    grids.push({
+      top: (topFrac * 100).toFixed(2) + '%',
+      height: (cellH * 100).toFixed(2) + '%',
+      left: '62px',
+      right: '16px',
+    });
+
+    xAxes.push({
+      gridIndex: gi,
+      type: 'category',
+      data: ALL_CATS,
+      axisLabel: {
+        show: gi === nG - 1,
+        fontSize: 9,
+        color: '#777',
+        formatter: function(v) { return fmtCatLabel(parseInt(v, 10)); },
+        interval: Math.floor(nFrames / 8),
+      },
+      splitLine: { lineStyle: { color: '#ebebeb', width: 1 } },
+      axisLine: { lineStyle: { color: '#ccc' } },
+      axisTick: { lineStyle: { color: '#ccc' }, alignWithLabel: true },
+      boundaryGap: true,
+    });
+
+    const yr = modelYRanges[gi];
+    yAxes.push({
+      gridIndex: gi,
+      type: 'value',
+      min: yr.min,
+      max: yr.max,
+      axisLabel: {
+        fontSize: 9,
+        color: '#777',
+        formatter: function(v) { return v.toFixed(0); },
+      },
+      splitLine: { lineStyle: { color: '#f0f0f0', width: 1 } },
+      axisLine: { lineStyle: { color: '#ccc' } },
+    });
+
+    series.push({
+      id: String(gi),
+      name: models[gi].name,
+      type: 'candlestick',
+      xAxisIndex: gi,
+      yAxisIndex: gi,
+      data: [],
+      itemStyle: {
+        color: '#26a69a',
+        color0: '#ef5350',
+        borderColor: '#26a69a',
+        borderColor0: '#ef5350',
+      },
+      markArea: {
+        silent: true,
+        data: [],
+      },
+    });
+  }
+
+  // Per-grid model label via graphic elements
+  const graphicLabels = models.map(function(m, gi) {
+    const topFrac = gi * (cellH + gapFrac);
+    return {
+      type: 'text',
+      top: (topFrac * 100 + 0.6).toFixed(2) + '%',
+      left: '64px',
+      style: {
+        text: m.label,
+        fontSize: 10,
+        fill: '#666',
+        font: '10px "Segoe UI", system-ui, sans-serif',
+      },
+      z: 100,
+    };
+  });
+
+  // dataZoom: synced across all 4 model panels (xAxisIndex covers all grids).
+  // 'inside' = mouse-wheel zoom + drag-pan; 'slider' = visible range bar at bottom.
+  // filterMode:'none' preserves all candle data while zooming (just rescales view).
+  // Both are part of the initial option so they persist through renderFrame's
+  // replaceMerge:['series'] calls (only series are replaced, dataZoom is untouched).
+  // On scene switch, loadScene calls setOption with notMerge:true which resets
+  // everything to full range (start:0, end:100) — desired behaviour.
+  const xAxisIndexAll = Array.from({ length: nG }, function(_, i) { return i; });
+  const dataZoom = [
+    {
+      type: 'inside',
+      xAxisIndex: xAxisIndexAll,
+      filterMode: 'none',
+      zoomOnMouseWheel: true,
+      moveOnMouseMove: true,
+      moveOnMouseWheel: false,
+    },
+    {
+      type: 'slider',
+      xAxisIndex: xAxisIndexAll,
+      filterMode: 'none',
+      // Position the slider in the reserved bottom area (bottom 10% of chart).
+      // Use pixel offsets from bottom so it sits just below the lowest panel.
+      bottom: 8,
+      height: 22,
+      left: '62px',
+      right: '16px',
+      borderColor: '#d0d0d0',
+      fillerColor: 'rgba(21, 101, 192, 0.12)',
+      handleStyle: { color: '#1565c0' },
+      textStyle: { fontSize: 9, color: '#888' },
+      showDataShadow: false,
+      showDetail: true,
+      labelFormatter: function(v, valStr) {
+        const t = parseInt(valStr, 10);
+        if (isNaN(t)) return valStr;
+        return fmtCatLabel(t);
+      },
+    },
+  ];
+
+  return {
+    backgroundColor: '#fafafa',
+    animation: true,
+    animationDuration: 150,
+    animationDurationUpdate: 220,
+    animationEasing: 'cubicOut',
+    animationEasingUpdate: 'cubicOut',
+    grid: grids,
+    xAxis: xAxes,
+    yAxis: yAxes,
+    series: series,
+    graphic: graphicLabels,
+    dataZoom: dataZoom,
+  };
+}
+
+// ============================================================
+// Build markArea data for a model at the current frameMs
+// ============================================================
+// Color = direction always (green=bull, red=bear).
+// Phase (forming / held / failed / timeout) controls fill intensity + border style.
+// Outcome badges (check/cross) are rendered separately as markPoints in renderFrame.
+function zonesForFrame(zones, frameMs) {
+  const areas = [];
+  for (const z of zones) {
+    if (z.t_detect > frameMs) continue;
+
+    const isBull = z.dir === 1;
+    let fillColor, borderColor, borderWidth, borderType;
+
+    if (z.state === 'timeout') {
+      // No outcome in window: direction-hue fill at medium opacity + solid border
+      fillColor   = isBull ? COLOR_BULL_TIMEOUT : COLOR_BEAR_TIMEOUT;
+      borderColor = isBull ? BORDER_BULL : BORDER_BEAR;
+      borderWidth = 1.5;
+      borderType  = 'solid';
+    } else if (z.state === 'tp' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+      // HELD: solid fill, solid border
+      fillColor   = isBull ? COLOR_BULL_HELD : COLOR_BEAR_HELD;
+      borderColor = isBull ? BORDER_BULL : BORDER_BEAR;
+      borderWidth = 2;
+      borderType  = 'solid';
+    } else if (z.state === 'sl' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+      // FAILED: medium fill, solid border
+      fillColor   = isBull ? COLOR_BULL_FAILED : COLOR_BEAR_FAILED;
+      borderColor = isBull ? BORDER_BULL : BORDER_BEAR;
+      borderWidth = 1.5;
+      borderType  = 'solid';
+    } else {
+      // FORMING: faint fill, dashed border
+      fillColor   = isBull ? COLOR_BULL_FORMING : COLOR_BEAR_FORMING;
+      borderColor = isBull ? BORDER_BULL : BORDER_BEAR;
+      borderWidth = 1;
+      borderType  = 'dashed';
+    }
+
+    // markArea references category keys (String of epoch ms) for x-coordinates
+    areas.push([
+      {
+        xAxis: String(z.x0),
+        yAxis: z.y0,
+        itemStyle: {
+          color: fillColor,
+          borderColor: borderColor,
+          borderWidth: borderWidth,
+          borderType: borderType,
+        }
+      },
+      { xAxis: String(z.x1), yAxis: z.y1 }
+    ]);
+  }
+  return areas;
+}
+
+// ============================================================
+// Build markPoint outcome badge data for a model at the current frameMs
+// ============================================================
+// Returns an array of markPoint data items: check (TP), cross (SL), or ? (timeout) badges.
+// Positioned at [catKey of x1, midpoint of zone y-range] so the badge sits
+// on the right edge of the zone box at the vertical centre of the gap.
+function markPointsForFrame(zones, frameMs) {
+  const pts = [];
+  for (const z of zones) {
+    if (z.t_detect > frameMs) continue;
+    if (z.state === 'tp' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+      pts.push({
+        coord: [String(z.x1), (z.y0 + z.y1) / 2],
+        symbol: 'circle',
+        symbolSize: 16,
+        itemStyle: { color: MARKER_TP_COLOR },
+        label: { show: true, formatter: '✓', color: '#fff', fontSize: 11, fontWeight: 'bold' },
+      });
+    } else if (z.state === 'sl' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+      pts.push({
+        coord: [String(z.x1), (z.y0 + z.y1) / 2],
+        symbol: 'circle',
+        symbolSize: 16,
+        itemStyle: { color: MARKER_SL_COLOR },
+        label: { show: true, formatter: '✗', color: '#fff', fontSize: 11, fontWeight: 'bold' },
+      });
+    } else if (z.state === 'timeout') {
+      // No outcome in window: grey ? badge revealed once t_detect <= frameMs
+      pts.push({
+        coord: [String(z.x1), (z.y0 + z.y1) / 2],
+        symbol: 'circle',
+        symbolSize: 16,
+        itemStyle: { color: MARKER_TIMEOUT_COLOR },
+        label: { show: true, formatter: '?', color: '#fff', fontSize: 11, fontWeight: 'bold' },
+      });
+    }
+  }
+  return pts;
+}
+
+// ============================================================
+// Render a single frame
+// ============================================================
+function renderFrame(f) {
+  if (nFrames === 0) return;
+  const clampedF = Math.max(0, Math.min(f, nFrames - 1));
+  currentFrame = clampedF;
+
+  const frameMs = frameTimes[clampedF];
+
+  const seriesUpdates = models.map(function(m, gi) {
+    // Reveal bars left-to-right: only bars with t <= frameMs, mapped to
+    // their category position. Categories beyond the current frame remain
+    // empty slots on the fixed-width axis (no horizontal rescaling).
+    const barMap = modelBarMaps[gi];
+    const barData = [];
+    for (const catKey of ALL_CATS) {
+      const t = parseInt(catKey, 10);
+      if (t > frameMs) break;  // ALL_CATS is sorted ascending
+      const b = barMap.get(catKey);
+      if (b) barData.push([b.o, b.c, b.l, b.h]);
+    }
+
+    const markAreaData = zonesForFrame(m.zones, frameMs);
+    const markPointData = markPointsForFrame(m.zones, frameMs);
+
+    return {
+      id: String(gi),
+      xAxisIndex: gi,
+      yAxisIndex: gi,
+      data: barData,
+      markArea: { silent: true, data: markAreaData },
+      markPoint: { silent: true, data: markPointData },
+    };
+  });
+
+  chart.setOption({ series: seriesUpdates }, { replaceMerge: ['series'] });
+
+  updateStatsTable(frameMs);
+
+  document.getElementById('scrub').value = clampedF;
+  document.getElementById('frame-counter').textContent =
+    (clampedF + 1) + ' / ' + nFrames;
+
+  document.getElementById('window-label').textContent =
+    'Bar ' + (clampedF + 1) + ' of ' + nFrames + ' · ' + fmtTime(frameMs) +
+    ' ET · SPY H1 test, 2023 to 2025';
+
+}
+
+// ============================================================
+// Playback controls
+// ============================================================
+function startPlay() {
+  if (intervalId) clearInterval(intervalId);
+  playing = true;
+  document.getElementById('btn-play').textContent = '⏸ Pause';
+  document.getElementById('btn-play').classList.add('active');
+  intervalId = setInterval(function() {
+    if (currentFrame >= nFrames - 1) {
+      stopPlay();
+      // Auto-open results modal once when playback reaches the final frame
+      if (!endShown) {
+        endShown = true;
+        openModal();
+      }
+      return;
+    }
+    renderFrame(currentFrame + 1);
+  }, Math.round(FRAME_MS / speedMultiplier));
+}
+
+function stopPlay() {
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  playing = false;
+  document.getElementById('btn-play').textContent = '▶ Play';
+  document.getElementById('btn-play').classList.remove('active');
+}
+
+function togglePlay() {
+  if (playing) {
+    stopPlay();
+  } else {
+    if (currentFrame >= nFrames - 1) {
+      restart();
+    } else {
+      endShown = false;
+      startPlay();
+    }
+  }
+}
+
+function restart() {
+  stopPlay();
+  closeModal();
+  endShown = false;
+  renderFrame(0);
+  startPlay();
+}
+
+function scrubTo(f) {
+  stopPlay();
+  renderFrame(f);
+}
+
+function setSpeed(s) {
+  speedMultiplier = s;
+  document.querySelectorAll('.speed-btn').forEach(function(b) {
+    b.classList.toggle('active', parseFloat(b.textContent) === s);
+  });
+  if (playing) startPlay();
+}
+
+function resetZoom() {
+  // Restore full x-range across all panels (start=0%, end=100%).
+  // Does not affect y-axes (y-ranges stay pinned per-model).
+  chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+}
+
+// ============================================================
+// Per-model stats table (live-updating)
+// ============================================================
+function updateStatsTable(frameMs) {
+  const tbody = document.getElementById('stats-tbody');
+  if (!tbody) return;
+
+  // Compute stats per model
+  const rows = models.map(function(m) {
+    let found = 0, bullish = 0, bearish = 0, held = 0, failed = 0, timeout = 0;
+    let confSum = 0;
+    for (const z of m.zones) {
+      if (z.t_detect > frameMs) continue;
+      found++;
+      if (z.dir === 1) bullish++;
+      else if (z.dir === 2) bearish++;
+      // Classify resolved outcomes only
+      if (z.state === 'tp' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+        held++;
+      } else if (z.state === 'sl' && z.t_resolve !== null && frameMs >= z.t_resolve) {
+        failed++;
+      } else if (z.state === 'timeout') {
+        timeout++;
+      }
+      // Accumulate confidence (use 0 if field absent for safety)
+      confSum += (z.conf !== undefined ? z.conf : 0);
+    }
+    const decided = held + failed;
+    const heldRate = decided === 0 ? null : (held / decided * 100);
+    const avgConf = found === 0 ? null : (confSum / found * 100);
+    return { name: m.label, found: found, bullish: bullish, bearish: bearish,
+             held: held, failed: failed, timeout: timeout, heldRate: heldRate,
+             avgConf: avgConf };
+  });
+
+  // Find best held rate (must have at least one decided outcome)
+  let bestIdx = -1;
+  let bestRate = -1;
+  rows.forEach(function(r, i) {
+    if (r.heldRate !== null && r.heldRate > bestRate) {
+      bestRate = r.heldRate;
+      bestIdx = i;
+    }
+  });
+
+  // Build table rows
+  tbody.innerHTML = '';
+  rows.forEach(function(r, i) {
+    const tr = document.createElement('tr');
+    if (i === bestIdx) tr.classList.add('best-held');
+    const heldRateStr = r.heldRate === null ? 'n/a' : r.heldRate.toFixed(0) + '%';
+    const avgConfStr = r.avgConf === null ? 'n/a' : r.avgConf.toFixed(0) + '%';
+    tr.innerHTML =
+      '<td>' + r.name + '</td>' +
+      '<td>' + r.found + '</td>' +
+      '<td>' + r.bullish + '</td>' +
+      '<td>' + r.bearish + '</td>' +
+      '<td>' + r.held + '</td>' +
+      '<td>' + r.failed + '</td>' +
+      '<td>' + r.timeout + '</td>' +
+      '<td>' + heldRateStr + '</td>' +
+      '<td>' + avgConfStr + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+// ============================================================
+// Resize
+// ============================================================
+window.addEventListener('resize', function() { chart.resize(); });
+
+// ============================================================
+// Boot: build scene buttons then load the default scene
+// ============================================================
+_buildSceneButtons();
+loadScene(PAYLOAD.default_scene);
+</script>
+</body>
+</html>

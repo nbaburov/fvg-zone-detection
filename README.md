@@ -21,6 +21,7 @@ The task is **data-hungry, not in need of a bigger model.** A simple model (grad
 | [`docs/evaluation.md`](docs/evaluation.md) | How we tested fairly: no time-leakage, multi-seed, confidence intervals, the G1-G10 validation sprint |
 | [`docs/trading-simulation.md`](docs/trading-simulation.md) | Exploratory study: would trading on these signals have made money? (honest: mostly no) |
 | [`docs/assignment.md`](docs/assignment.md) | The course brief + deadlines |
+| [`docs/presenation/`](docs/presenation/) | The final 5-minute presentation: `content.md` (talk script), `deck.html` (self-contained slides), `presenter-notes.md` (presenter cheat-sheet) |
 
 **Not a developer? Suggested reading order:** overview -> data -> models -> evaluation -> trading-simulation. Start with `docs/overview.md` and follow the links at the bottom of each page.
 
@@ -68,6 +69,9 @@ python scripts/inspect_models.py --dataset test --all-exit-strategies --realisti
 
 # 7. (Optional) live paper-trade during market hours
 python scripts/paper_trade.py --model lstm:checkpoints/lstm_h1_spy/lstm_seed42.pt --session demo --dry-run
+
+# Build the presentation demo (offline ECharts FVG-replay HTML)
+python scripts/demo_animator.py
 ```
 
 Results land in `reports/inspect/<timestamp>/`. Open `summary.md` for the metric and outcome tables, and `plots/` for the chart overlays.
@@ -82,7 +86,8 @@ src/training/  loss functions, early stopping, seeding
 src/strategy/  the FVG trade-exit rules + realism guards (single source of truth for the trade-sim)
 src/inspect/   offline analysis: run any model on unseen data, simulate trades
 src/live/      live paper-trading harness (Alpaca paper account)
-scripts/       command-line entry points (data, training, rigor/sweeps, inspect, paper-trade)
+src/demo/      presentation demo backend (builds the offline FVG-replay HTML)
+scripts/       command-line entry points (data, training, rigor/sweeps, inspect, paper-trade, demo)
 notebooks/     the project narrative (00-07, incl. presentation decks)
 tests/         pytest suite, mirrors src/
 docs/          the docs indexed above

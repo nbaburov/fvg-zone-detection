@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMC Fair Value Gap Detection - Final Presentation</title>
+<style>
+  /* ── Design tokens ── */
+  :root{
+    --bg:#f8f8fb;
+    --panel:#ffffff;
+    --ink:#12121a;
+    --muted:#6a6a7a;
+    --muted2:#9a9aaa;
+    --line:#e4e4ee;
+    --line2:#f0f0f6;
+    --accent:#3d3aed;
+    --accent-soft:#eeeeff;
+    --accent-mid:#6663f5;
+    --bull:#0f8a4e;
+    --bear:#d63030;
+    --grey:#8a90a0;
+    --bull-soft:#e6f4ed;
+    --bear-soft:#fceaea;
+    --bull-mid:#1aad63;
+    --warn:#c47a00;
+    --warn-soft:#fff6e0;
+    --maxw:980px;
+    --sp:8px;
+    /* Serif for display, system sans for body */
+    --serif:Georgia,"Iowan Old Style","Palatino Linotype",Palatino,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SF Mono","Fira Mono","Cascadia Mono",Consolas,monospace;
+    /* Slide numeral tint */
+    --num-ink:#d4d4e8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden}
+  body{
+    font-family:var(--sans);
+    background:var(--bg);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+
+  /* ── Faint background texture (pure CSS, no images, no network) ── */
+  body::before{
+    content:"";
+    position:fixed;inset:0;
+    pointer-events:none;
+    z-index:0;
+    background-image:
+      radial-gradient(circle, rgba(100,100,180,.028) 1px, transparent 1px);
+    background-size:28px 28px;
+  }
+
+  /* ── Progress bar ── */
+  #bar{
+    position:fixed;top:0;left:0;height:2px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-mid));
+    width:0;z-index:50;
+    transition:width .4s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ── Slide shell ── */
+  .slide{
+    position:fixed;inset:0;
+    display:flex;flex-direction:column;justify-content:center;align-items:center;
+    padding:58px 7vw 52px;
+    opacity:0;visibility:hidden;
+    transform:translateY(14px);
+    transition:opacity .4s cubic-bezier(.4,0,.2,1),transform .4s cubic-bezier(.4,0,.2,1);
+    z-index:1;
+  }
+  .slide.active{opacity:1;visibility:visible;transform:none}
+  .wrap{width:100%;max-width:var(--maxw);position:relative}
+
+  /* ── Slide index numeral (signature device) ── */
+  .slide-num{
+    position:absolute;
+    top:-2px;right:0;
+    font-family:var(--serif);
+    font-size:clamp(54px,6.5vw,82px);
+    font-weight:700;
+    line-height:1;
+    color:var(--num-ink);
+    letter-spacing:-.03em;
+    pointer-events:none;
+    user-select:none;
+    /* Subtle entrance */
+    transition:color .4s;
+  }
+
+  /* ── Header rule system (hairline under kicker, full width) ── */
+  .slide-header{
+    display:flex;align-items:center;gap:0;
+    margin-bottom:22px;
+    padding-bottom:14px;
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  /* Accent tick at start of rule */
+  .slide-header::after{
+    content:"";
+    position:absolute;bottom:-1px;left:0;
+    width:36px;height:2px;
+    background:var(--accent);
+    border-radius:1px;
+  }
+
+  /* ── Type scale ── */
+  .kicker{
+    font-family:var(--sans);
+    font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--accent);font-weight:700;
+    white-space:nowrap;
+    flex:1;
+  }
+  /* Display headings use serif */
+  h1{
+    font-family:var(--serif);
+    font-size:clamp(34px,5vw,60px);
+    line-height:1.05;font-weight:700;
+    letter-spacing:-.02em;
+    color:var(--ink);
+  }
+  h2{
+    font-family:var(--serif);
+    font-size:clamp(20px,2.8vw,35px);
+    line-height:1.1;font-weight:700;
+    letter-spacing:-.018em;
+    margin-bottom:22px;
+    color:var(--ink);
+  }
+  h3{
+    font-family:var(--sans);
+    font-size:clamp(13px,1.3vw,15px);
+    font-weight:750;
+    letter-spacing:-.01em;
+    color:var(--ink);
+    margin-bottom:5px;
+  }
+  .lead{font-size:clamp(16px,1.65vw,20px);line-height:1.6;color:var(--ink);font-family:var(--sans)}
+  .sub{font-size:clamp(15px,1.6vw,19px);line-height:1.6;color:var(--muted);font-family:var(--sans)}
+  p,li{font-size:clamp(13px,1.2vw,15.5px);line-height:1.68;color:var(--ink)}
+  .caption{font-size:11.5px;color:var(--muted);line-height:1.5}
+  .muted{color:var(--muted)}
+  .accent{color:var(--accent)}
+
+  /* ── Tabular figure class (all data numbers) ── */
+  .fig{
+    font-variant-numeric:tabular-nums;
+    font-feature-settings:"tnum";
+  }
+  strong{font-weight:750}
+
+  /* ── Layout helpers ── */
+  .row{display:flex;gap:20px}
+  .col{flex:1 1 0;min-width:0}
+  .eqcards{align-items:stretch}
+  .eqcards>.col{display:flex}
+  .eqcards>.col>.card{flex:1}
+  .vstack{display:flex;flex-direction:column}
+
+  /* ── Cards ── */
+  .card{
+    background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:18px 20px;
+    box-shadow:0 1px 4px rgba(18,18,30,.045);
+  }
+  .card p{font-size:13px;color:var(--muted);line-height:1.58}
+
+  .note{
+    margin-top:12px;font-size:12.5px;color:var(--muted);
+    background:var(--accent-soft);border-radius:8px;padding:11px 15px;line-height:1.52;
+  }
+
+  /* ── Clean list ── */
+  ul.clean{list-style:none;margin-top:16px}
+  ul.clean li{
+    position:relative;padding-left:24px;margin:12px 0;
+    font-size:clamp(15px,1.55vw,18px);line-height:1.58;
+  }
+  /* Hairline dash instead of dot - more editorial */
+  ul.clean li::before{
+    content:"";position:absolute;left:0;top:.72em;
+    width:12px;height:1.5px;background:var(--accent);border-radius:1px;
+  }
+
+  /* ── Pill / badge ── */
+  .pill{
+    display:inline-block;background:var(--accent-soft);color:var(--accent);
+    font-size:10px;font-weight:800;letter-spacing:.06em;
+    border-radius:4px;padding:2px 7px;white-space:nowrap;
+    font-family:var(--sans);
+  }
+  .tag{
+    display:inline-flex;border-radius:7px;padding:7px 12px;
+    align-items:flex-start;gap:10px;
+    background:var(--bg);border:1px solid var(--line);
+  }
+
+  /* ── Model ladder ── */
+  .ladder{
+    display:flex;gap:0;border-radius:10px;
+    overflow:hidden;border:1px solid var(--line);
+    margin-top:14px;
+  }
+  .rung{
+    flex:1;padding:14px 8px;background:var(--panel);
+    text-align:center;border-right:1px solid var(--line);
+    transition:background .2s;
+  }
+  .rung:last-child{border-right:none}
+  .rtype{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:4px}
+  .rname{
+    font-family:var(--serif);
+    font-size:clamp(13px,1.3vw,16px);font-weight:700;
+    letter-spacing:-.01em;line-height:1.2;
+  }
+  .rsub{font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.35}
+  .rung.baseline{background:var(--accent-soft)}
+  .rung.baseline .rname{color:var(--accent)}
+  .rung.best{background:var(--bull-soft)}
+  .rung.best .rname{color:var(--bull)}
+
+  /* ── Bar chart helpers ── */
+  .bar-row{margin-bottom:9px}
+  .bar-meta{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+  .bar-label{font-size:12.5px;font-weight:700;font-family:var(--sans)}
+  .bar-val{
+    font-size:14px;font-weight:800;
+    font-variant-numeric:tabular-nums;
+    font-feature-settings:"tnum";
+    font-family:var(--serif);
+  }
+  .bar-track{height:7px;background:var(--line2);border-radius:4px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:4px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+
+  /* ── Validation stat cards ── */
+  .statgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:20px}
+  .statcard{
+    background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;padding:20px 14px;text-align:center;
+    border-top:2px solid var(--accent);
+  }
+  .statcard .sv{
+    font-family:var(--serif);
+    font-size:clamp(28px,3.8vw,46px);font-weight:700;
+    font-variant-numeric:tabular-nums;
+    letter-spacing:-.02em;line-height:1.1;
+    color:var(--ink);
+  }
+  .statcard .sk{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.45;font-family:var(--sans)}
+  .statcard .sico{margin-bottom:10px}
+
+  /* ── GBU cards ── */
+  .gbu{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:0}
+  .gbu .card{min-width:0;position:relative;padding-top:22px}
+  .verdict-badge{
+    display:inline-flex;align-items:center;gap:6px;
+    font-size:10.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;
+    margin-bottom:9px;
+    font-family:var(--sans);
+  }
+  .verdict-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .good{border-top:2px solid var(--bull)}
+  .bad{border-top:2px solid var(--warn)}
+  .ugly{border-top:2px solid var(--bear)}
+  .good .verdict-badge{color:var(--bull)}
+  .bad .verdict-badge{color:var(--warn)}
+  .ugly .verdict-badge{color:var(--bear)}
+  .good .verdict-dot{background:var(--bull)}
+  .bad .verdict-dot{background:var(--warn)}
+  .ugly .verdict-dot{background:var(--bear)}
+  .gbu .card p{font-size:12.5px;color:var(--muted);margin-bottom:10px;line-height:1.58}
+  .verdict-line{font-size:12.5px;font-weight:700;margin-top:auto;font-family:var(--sans)}
+  .good .verdict-line{color:var(--bull)}
+  .bad .verdict-line{color:var(--warn)}
+  .ugly .verdict-line{color:var(--bear)}
+
+  /* ── Demo CTA ── */
+  .demo-cta{
+    display:inline-flex;align-items:center;gap:12px;
+    padding:15px 26px;
+    background:var(--accent);color:#fff;
+    border-radius:10px;text-decoration:none;
+    font-size:15px;font-weight:700;letter-spacing:.01em;
+    box-shadow:0 4px 20px rgba(61,58,237,.24);
+    transition:transform .15s ease,box-shadow .15s ease;
+    font-family:var(--sans);
+  }
+  .demo-cta:hover{transform:translateY(-2px);box-shadow:0 7px 26px rgba(61,58,237,.32)}
+  .demo-caption{
+    margin-top:16px;font-size:14px;color:var(--muted);
+    line-height:1.65;max-width:52ch;font-family:var(--sans);
+  }
+
+  /* ── Footer ── */
+  footer{
+    position:fixed;bottom:0;left:0;right:0;
+    height:38px;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 7vw;
+    font-size:11.5px;color:var(--muted2);
+    z-index:40;
+    border-top:1px solid var(--line);
+    background:var(--bg);
+    font-family:var(--sans);
+    letter-spacing:.01em;
+  }
+  footer .title{font-weight:600;color:var(--muted);font-family:var(--sans)}
+  .hint{
+    position:fixed;bottom:9px;left:50%;transform:translateX(-50%);
+    font-size:10.5px;color:#c4c4d4;z-index:41;
+    pointer-events:none;font-family:var(--sans);
+  }
+  kbd{
+    background:var(--panel);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:4px;padding:1px 5px;font-size:10px;font-family:var(--sans);
+  }
+
+  /* ── Hero number moments ── */
+  .hero-num{
+    font-family:var(--serif);
+    font-variant-numeric:tabular-nums;
+    font-feature-settings:"tnum";
+    font-size:clamp(48px,7vw,88px);
+    font-weight:700;
+    letter-spacing:-.03em;
+    line-height:1;
+    color:var(--ink);
+  }
+  .hero-label{
+    font-family:var(--sans);
+    font-size:12px;font-weight:700;
+    letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);
+    margin-top:6px;
+  }
+
+  /* ── Bull/bear duality accent strip (left border device on select panels) ── */
+  .dual-strip{
+    border-left:3px solid transparent;
+    border-image:linear-gradient(180deg,var(--bull),var(--bear)) 1;
+    padding-left:14px;
+  }
+
+  /* ── Entrance animation for hero elements ── */
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .slide.active .hero-num,
+  .slide.active h1,
+  .slide.active .anim-in{
+    animation:fadeUp .45s cubic-bezier(.4,0,.2,1) both;
+  }
+  .slide.active .anim-in-2{animation:fadeUp .45s .1s cubic-bezier(.4,0,.2,1) both;}
+  .slide.active .anim-in-3{animation:fadeUp .45s .18s cubic-bezier(.4,0,.2,1) both;}
+
+  /* ── Inversion highlight box ── */
+  .flip-box{
+    background:var(--bull-soft);
+    border:1px solid var(--bull);
+    border-radius:10px;
+    padding:14px 16px;
+    position:relative;
+  }
+  .flip-tag{
+    position:absolute;top:-1px;right:14px;
+    background:var(--bull);color:#fff;
+    font-size:9px;font-weight:800;letter-spacing:.1em;
+    padding:2px 8px;border-radius:0 0 6px 6px;
+    font-family:var(--sans);
+  }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+
+<!-- =========================================================
+     0 - TITLE
+========================================================= -->
+<section class="slide active">
+  <div class="wrap">
+    <div class="slide-num">00</div>
+    <div class="slide-header">
+      <div class="kicker">AI-Advanced &middot; Data-Driven Innovation Challenge</div>
+    </div>
+    <h1 style="max-width:16ch">Teaching five AIs to spot what traders draw by hand.</h1>
+    <p class="sub anim-in-2" style="margin-top:22px;max-width:44ch">Automatically detecting <strong style="color:var(--ink)">Fair Value Gaps</strong> on the SPY chart, and discovering the answer wasn't a smarter model.</p>
+
+    <!-- Bull/bear duality mark on cover -->
+    <div class="anim-in-3" style="margin-top:44px;display:flex;align-items:center;gap:14px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="1.5" y="5" width="13" height="8" rx="2" stroke="var(--bull)" stroke-width="1.5"/>
+          <line x1="8" y1="5" x2="8" y2="2" stroke="var(--bull)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="5.5" y1="2" x2="10.5" y2="2" stroke="var(--bull)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span style="font-size:12px;color:var(--bull);font-weight:700;letter-spacing:.04em">BULL FVG</span>
+      </div>
+      <div style="width:1px;height:16px;background:var(--line)"></div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="1.5" y="3" width="13" height="8" rx="2" stroke="var(--bear)" stroke-width="1.5"/>
+          <line x1="8" y1="11" x2="8" y2="14" stroke="var(--bear)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="5.5" y1="14" x2="10.5" y2="14" stroke="var(--bear)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span style="font-size:12px;color:var(--bear);font-weight:700;letter-spacing:.04em">BEAR FVG</span>
+      </div>
+      <div style="width:1px;height:16px;background:var(--line)"></div>
+      <span style="font-size:12px;color:var(--muted);letter-spacing:.01em">Nikola Baburov</span>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     1 - HOOK
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">01</div>
+    <div class="slide-header">
+      <div class="kicker">The hook</div>
+    </div>
+    <h2>Pro traders mark certain zones by hand<br>and treat them as magnets.</h2>
+    <p class="lead" style="max-width:50ch">I spent this project teaching a computer to find those zones automatically. The most interesting thing I found <span class="accent" style="font-weight:700">wasn't about AI at all.</span></p>
+  </div>
+</section>
+
+<!-- =========================================================
+     2 - THINK BIG
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">02</div>
+    <div class="slide-header">
+      <div class="kicker">Think Big &middot; the vision</div>
+    </div>
+    <h2>A co-pilot that reads a chart<br>like an institutional trader.</h2>
+    <div class="row eqcards" style="margin-top:4px">
+      <div class="col">
+        <div class="card" style="border-top:2px solid var(--line)">
+          <h3>Today</h3>
+          <p>Done by hand. Slow, and everyone draws it slightly differently.</p>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card" style="border-top:2px solid var(--accent)">
+          <h3 style="color:var(--accent)">The vision</h3>
+          <p>Every structure marked automatically, with a confidence score, in real time, consistently.</p>
+        </div>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:18px;font-size:13.5px;max-width:62ch;line-height:1.6">MVP: one pattern (Fair Value Gap) on one stock (SPY), built with real machine-learning discipline. Scale the vision from there.</p>
+  </div>
+</section>
+
+<!-- =========================================================
+     3 - MVP + FVG
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">03</div>
+    <div class="slide-header">
+      <div class="kicker">My MVP &middot; one pattern, one stock</div>
+    </div>
+    <h2 style="margin-bottom:14px">A Fair Value Gap is a skipped stair-step.</h2>
+
+    <div class="row" style="align-items:flex-start;gap:28px">
+
+      <!-- SVG: rebuilt with clear space, labels outside candles, callouts well clear of bodies -->
+      <div style="flex:1 1 400px;min-width:300px;max-width:560px">
+        <svg viewBox="0 0 600 300" width="100%" style="display:block;overflow:visible" aria-label="Fair Value Gap candlestick diagram">
+
+          <!-- ============ LEFT: BULLISH FVG (price gaps up) ============ -->
+          <text x="140" y="16" text-anchor="middle" font-size="10.5" font-weight="800" fill="#0f8a4e" letter-spacing=".1em" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">BULLISH FVG</text>
+
+          <!-- C1 (lower candle) -->
+          <line x1="72" y1="135" x2="72" y2="196" stroke="#d63030" stroke-width="1.5"/>
+          <rect x="59" y="150" width="26" height="38" rx="3" fill="#d63030" opacity=".82"/>
+          <!-- C2 (big bullish impulse) -->
+          <line x1="140" y1="46" x2="140" y2="192" stroke="#0f8a4e" stroke-width="1.5"/>
+          <rect x="127" y="58" width="26" height="120" rx="3" fill="#0f8a4e" opacity=".82"/>
+          <!-- C3 (higher candle) -->
+          <line x1="208" y1="42" x2="208" y2="105" stroke="#0f8a4e" stroke-width="1.5"/>
+          <rect x="195" y="54" width="26" height="40" rx="3" fill="#0f8a4e" opacity=".82"/>
+
+          <!-- GAP band: C1.high (bottom) to C3.low (top) -->
+          <rect x="48" y="105" width="194" height="30" rx="3" fill="#0f8a4e" opacity=".16"/>
+
+          <!-- C3 low = TOP edge -->
+          <line x1="195" y1="105" x2="246" y2="105" stroke="#0f8a4e" stroke-width="1" stroke-dasharray="3,3" opacity=".6"/>
+          <text x="249" y="108" font-size="9.5" fill="#0f8a4e" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C3 low</text>
+          <!-- C1 high = BOTTOM edge -->
+          <line x1="59" y1="135" x2="246" y2="135" stroke="#0f8a4e" stroke-width="1" stroke-dasharray="3,3" opacity=".6"/>
+          <text x="249" y="138" font-size="9.5" fill="#0f8a4e" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C1 high</text>
+
+          <!-- Gap bracket -->
+          <line x1="40" y1="105" x2="40" y2="135" stroke="#0f8a4e" stroke-width="1.8"/>
+          <line x1="40" y1="105" x2="46" y2="105" stroke="#0f8a4e" stroke-width="1.8"/>
+          <line x1="40" y1="135" x2="46" y2="135" stroke="#0f8a4e" stroke-width="1.8"/>
+          <text x="24" y="120" font-size="8.5" font-weight="800" fill="#0f8a4e" text-anchor="middle" transform="rotate(-90 24 120)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">GAP</text>
+
+          <text x="72"  y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C1</text>
+          <text x="140" y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C2</text>
+          <text x="208" y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C3</text>
+
+          <rect x="20" y="234" width="214" height="44" rx="7" fill="#e6f4ed" stroke="#0f8a4e" stroke-width="1"/>
+          <text x="127" y="252" text-anchor="middle" font-size="10.5" fill="#0f8a4e" font-weight="800" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">the gap (skipped stair-step)</text>
+          <text x="127" y="268" text-anchor="middle" font-size="9.5" fill="#0f8a4e" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C1 high below C3 low, nothing traded here</text>
+
+          <!-- Divider -->
+          <line x1="300" y1="8" x2="300" y2="288" stroke="#e4e4ee" stroke-width="1"/>
+
+          <!-- ============ RIGHT: BEARISH FVG (price gaps down) ============ -->
+          <text x="450" y="16" text-anchor="middle" font-size="10.5" font-weight="800" fill="#d63030" letter-spacing=".1em" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">BEARISH FVG</text>
+
+          <!-- C1 (higher candle) -->
+          <line x1="382" y1="42" x2="382" y2="105" stroke="#0f8a4e" stroke-width="1.5"/>
+          <rect x="369" y="54" width="26" height="40" rx="3" fill="#0f8a4e" opacity=".82"/>
+          <!-- C2 (big bearish impulse) -->
+          <line x1="450" y1="46" x2="450" y2="192" stroke="#d63030" stroke-width="1.5"/>
+          <rect x="437" y="58" width="26" height="120" rx="3" fill="#d63030" opacity=".82"/>
+          <!-- C3 (lower candle) -->
+          <line x1="518" y1="135" x2="518" y2="196" stroke="#d63030" stroke-width="1.5"/>
+          <rect x="505" y="150" width="26" height="38" rx="3" fill="#d63030" opacity=".82"/>
+
+          <!-- GAP band: C3.high (bottom) to C1.low (top) -->
+          <rect x="358" y="105" width="194" height="30" rx="3" fill="#d63030" opacity=".13"/>
+
+          <!-- C1 low = TOP edge -->
+          <line x1="354" y1="105" x2="395" y2="105" stroke="#d63030" stroke-width="1" stroke-dasharray="3,3" opacity=".6"/>
+          <text x="351" y="108" text-anchor="end" font-size="9.5" fill="#d63030" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C1 low</text>
+          <!-- C3 high = BOTTOM edge -->
+          <line x1="354" y1="135" x2="531" y2="135" stroke="#d63030" stroke-width="1" stroke-dasharray="3,3" opacity=".6"/>
+          <text x="351" y="138" text-anchor="end" font-size="9.5" fill="#d63030" font-weight="700" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C3 high</text>
+
+          <!-- Gap bracket -->
+          <line x1="560" y1="105" x2="560" y2="135" stroke="#d63030" stroke-width="1.8"/>
+          <line x1="554" y1="105" x2="560" y2="105" stroke="#d63030" stroke-width="1.8"/>
+          <line x1="554" y1="135" x2="560" y2="135" stroke="#d63030" stroke-width="1.8"/>
+          <text x="576" y="120" font-size="8.5" font-weight="800" fill="#d63030" text-anchor="middle" transform="rotate(90 576 120)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">GAP</text>
+
+          <text x="382" y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C1</text>
+          <text x="450" y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C2</text>
+          <text x="518" y="214" text-anchor="middle" font-size="9.5" fill="#9a9aaa" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C3</text>
+
+          <rect x="345" y="234" width="214" height="44" rx="7" fill="#fceaea" stroke="#d63030" stroke-width="1"/>
+          <text x="452" y="252" text-anchor="middle" font-size="10.5" fill="#d63030" font-weight="800" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">the gap (skipped stair-step)</text>
+          <text x="452" y="268" text-anchor="middle" font-size="9.5" fill="#d63030" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">C3 high below C1 low, nothing traded here</text>
+        </svg>
+      </div>
+
+      <!-- Right column -->
+      <div style="flex:1 1 220px;display:flex;flex-direction:column;gap:11px;min-width:180px">
+        <p style="font-size:13.5px;line-height:1.65;color:var(--muted)">A fast move over three bars leaves a price zone that barely traded. Traders expect price to come back and fill it.</p>
+
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div class="tag">
+            <span class="pill">FVG</span>
+            <span style="font-size:12px;color:var(--muted);line-height:1.4">The untraded price gap, the skipped step</span>
+          </div>
+          <div class="tag">
+            <span class="pill">SPY</span>
+            <span style="font-size:12px;color:var(--muted);line-height:1.4">Tracks the 500 biggest US companies</span>
+          </div>
+          <div class="tag">
+            <span class="pill">fill</span>
+            <span style="font-size:12px;color:var(--muted);line-height:1.4">Price returns into the gap later</span>
+          </div>
+          <div class="tag">
+            <span class="pill">score</span>
+            <span style="font-size:12px;color:var(--muted);line-height:1.4">How confident the model is (0-100%)</span>
+          </div>
+        </div>
+
+        <div class="dual-strip" style="background:var(--bear-soft);border-radius:0 8px 8px 0;padding:10px 13px 10px 14px">
+          <p style="font-size:12px;color:var(--bear);line-height:1.48"><strong>Not</strong> price prediction. I find <em>where</em> the pattern is, not which way price goes.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     4 - DATA + HARD
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">04</div>
+    <div class="slide-header">
+      <div class="kicker">The data &middot; and why it's hard</div>
+    </div>
+    <h2 style="margin-bottom:14px">9 years of hourly SPY. Two real traps.</h2>
+
+    <div class="row" style="align-items:flex-start;gap:28px">
+
+      <!-- LEFT: rarity grid -->
+      <div style="flex:1 1 300px;min-width:260px">
+        <p style="font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:9px">Trap 1: accuracy lies</p>
+
+        <svg id="raritygrid" viewBox="0 0 373 234" width="100%" style="display:block;margin-bottom:8px" aria-label="Rarity: 97% none, 1.8% bull, 1.3% bear"></svg>
+
+        <p class="caption" style="margin-bottom:8px">
+          <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--bull);vertical-align:middle;margin-right:4px"></span>1.8% bullish gap
+          <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--bear);vertical-align:middle;margin-right:4px;margin-left:10px"></span>1.3% bearish gap
+          <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#e4e4ee;border:1px solid #d0d0da;vertical-align:middle;margin-right:4px;margin-left:10px"></span>97% no gap
+        </p>
+        <div style="background:var(--warn-soft);border-radius:8px;padding:9px 13px;border:1px solid rgba(196,122,0,.25)">
+          <p style="font-size:12px;color:#7a5200;line-height:1.48"><strong>The trap:</strong> always say "no gap" and you're 97% accurate and completely useless. So I score the rare class, not accuracy.</p>
+        </div>
+      </div>
+
+      <!-- RIGHT: timeline + leak card -->
+      <div style="flex:1 1 300px;min-width:260px;display:flex;flex-direction:column;gap:13px">
+        <p style="font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Trap 2: no peeking at the future</p>
+
+        <svg viewBox="0 0 384 78" width="100%" style="display:block" aria-label="Train/validate/test timeline 2016-2025">
+          <line x1="10" y1="42" x2="374" y2="42" stroke="#e4e4ee" stroke-width="1.5"/>
+          <polygon points="374,38 384,42 374,46" fill="#9a9aaa"/>
+
+          <rect x="10" y="30" width="176" height="24" rx="4" fill="var(--accent)" opacity=".12"/>
+          <rect x="10" y="30" width="176" height="24" rx="4" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="98" y="46" text-anchor="middle" font-size="10" font-weight="800" fill="var(--accent)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">TRAIN 2016-2021</text>
+
+          <rect x="190" y="30" width="44" height="24" rx="4" fill="var(--warn)" opacity=".14"/>
+          <rect x="190" y="30" width="44" height="24" rx="4" fill="none" stroke="var(--warn)" stroke-width="1.5"/>
+          <text x="212" y="46" text-anchor="middle" font-size="9" font-weight="800" fill="var(--warn)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">VAL 22</text>
+
+          <rect x="238" y="30" width="110" height="24" rx="4" fill="var(--bull)" opacity=".11"/>
+          <rect x="238" y="30" width="110" height="24" rx="4" fill="none" stroke="var(--bull)" stroke-width="1.5"/>
+          <text x="293" y="46" text-anchor="middle" font-size="10" font-weight="800" fill="var(--bull)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">TEST 2023-2025</text>
+
+          <text x="10"  y="64" font-size="9" fill="#9a9aaa" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">2016</text>
+          <text x="190" y="64" font-size="9" fill="#9a9aaa" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">2022</text>
+          <text x="238" y="64" font-size="9" fill="#9a9aaa" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">2023</text>
+          <text x="358" y="64" font-size="9" fill="#9a9aaa" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">2025</text>
+
+          <text x="180" y="14" text-anchor="middle" font-size="9.5" fill="#6a6a7a" font-style="italic" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif">train on the past, test on the future, never the reverse</text>
+        </svg>
+
+        <div class="dual-strip" style="background:var(--bull-soft);border-radius:0 8px 8px 0;padding:12px 14px 12px 14px">
+          <p style="font-size:12.5px;font-weight:750;color:var(--bull);margin-bottom:4px;letter-spacing:.01em">Leak caught</p>
+          <p style="font-size:12px;color:#0d7040;line-height:1.52">Found a popular open-source library quietly peeking <strong>one bar ahead</strong>. Results looked great and meant nothing. Catching that mattered more than any single model.</p>
+        </div>
+
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px">
+          <p class="caption">Only ~117 truly independent examples on hourly bars (60-bar windows overlap heavily). Small-data regime.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     5 - FIVE MODELS
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">05</div>
+    <div class="slide-header">
+      <div class="kicker">How I built it</div>
+    </div>
+    <h2>Five models, simple to advanced, head-to-head.</h2>
+
+    <div class="ladder">
+      <div class="rung baseline">
+        <div class="rtype">baseline to beat</div>
+        <div class="rname">XGBoost</div>
+        <div class="rsub">Decision trees with handcrafted features</div>
+      </div>
+      <div class="rung">
+        <div class="rtype">neural</div>
+        <div class="rname">LSTM</div>
+        <div class="rsub">Learns sequences step by step</div>
+      </div>
+      <div class="rung best">
+        <div class="rtype">neural &middot; best DL</div>
+        <div class="rname">CNN-LSTM</div>
+        <div class="rsub">Pattern detector + sequence memory</div>
+      </div>
+      <div class="rung">
+        <div class="rtype">neural</div>
+        <div class="rname">Transformer</div>
+        <div class="rsub">Same family as ChatGPT</div>
+      </div>
+      <div class="rung">
+        <div class="rtype">neural &middot; newest</div>
+        <div class="rname">xLSTM</div>
+        <div class="rsub">2024 architecture, academic experiment</div>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <span style="font-size:11.5px;color:var(--muted2);white-space:nowrap">simpler</span>
+      <div style="flex:1;height:2px;background:linear-gradient(90deg,var(--accent-soft),var(--accent));border-radius:1px"></div>
+      <span style="font-size:11.5px;color:var(--muted2);white-space:nowrap">more complex</span>
+    </div>
+
+    <p style="margin-top:16px;font-size:13.5px;color:var(--muted);max-width:64ch;line-height:1.65">Each reads a sliding window of the <strong style="color:var(--ink)">last 60 hours</strong> and answers one question: <strong style="color:var(--accent)">gap here, or no gap?</strong> Same data, same rules, fairest possible comparison.</p>
+  </div>
+</section>
+
+<!-- =========================================================
+     6 - THE SURPRISE
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">06</div>
+    <div class="slide-header">
+      <div class="kicker">The surprise &middot; headline finding</div>
+    </div>
+    <h2>The bottleneck was data, not model power.</h2>
+
+    <div class="row" style="align-items:stretch;gap:14px;margin-top:2px">
+
+      <!-- Panel 1: Hourly -->
+      <div style="flex:1 1 200px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px">
+        <p style="font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:11px">Hourly bars &middot; macro-F1</p>
+        <div class="bar-row">
+          <div class="bar-meta"><span class="bar-label" style="color:var(--accent)">XGBoost</span><span class="bar-val fig" style="color:var(--accent)">0.738</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:73.8%;background:var(--accent)"></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-meta"><span class="bar-label" style="color:var(--muted)">CNN-LSTM</span><span class="bar-val fig" style="color:var(--muted)">0.675</span></div>
+          <div class="bar-track"><div class="bar-fill" style="width:67.5%;background:var(--grey)"></div></div>
+        </div>
+        <p style="margin-top:9px;font-size:11px;color:var(--muted);line-height:1.52;border-top:1px solid var(--line);padding-top:7px">Simple model wins. Neural net is data-hungry, only ~117 independent examples here.</p>
+      </div>
+
+      <!-- Arrow -->
+      <div style="display:flex;align-items:center;justify-content:center;flex:0 0 32px">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <line x1="4" y1="14" x2="21" y2="14" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+          <polyline points="15,8 21,14 15,20" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+
+      <!-- Panel 2: Add data -->
+      <div style="flex:0 1 148px;display:flex;align-items:center;justify-content:center">
+        <div style="text-align:center">
+          <div style="font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Add more data</div>
+          <div style="background:var(--accent-soft);border-radius:8px;padding:8px 11px;margin-bottom:7px">
+            <div style="font-size:11px;font-weight:750;color:var(--accent)">4 stocks pooled</div>
+            <div style="font-size:10px;color:var(--muted)">SPY+QQQ+IWM+DIA</div>
+          </div>
+          <div style="background:var(--accent-soft);border-radius:8px;padding:8px 11px">
+            <div style="font-size:11px;font-weight:750;color:var(--accent)">5-min bars</div>
+            <div style="font-size:10px;color:var(--muted)">~12x more examples</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="display:flex;align-items:center;justify-content:center;flex:0 0 32px">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <line x1="4" y1="14" x2="21" y2="14" stroke="var(--bull)" stroke-width="1.5" stroke-linecap="round"/>
+          <polyline points="15,8 21,14 15,20" stroke="var(--bull)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+
+      <!-- Panel 3: 5-min flipped -->
+      <div class="flip-box" style="flex:1 1 200px">
+        <div class="flip-tag">FLIP</div>
+        <p style="font-size:9.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--bull);margin-bottom:11px">5-minute bars &middot; macro-F1</p>
+        <div class="bar-row">
+          <div class="bar-meta"><span class="bar-label" style="color:var(--bull)">CNN-LSTM</span><span class="bar-val fig" style="color:var(--bull)">0.713</span></div>
+          <div class="bar-track" style="background:#c5e4d2"><div class="bar-fill" style="width:71.3%;background:var(--bull)"></div></div>
+        </div>
+        <div class="bar-row">
+          <div class="bar-meta"><span class="bar-label" style="color:var(--muted)">XGBoost</span><span class="bar-val fig" style="color:var(--muted)">0.654</span></div>
+          <div class="bar-track" style="background:#c5e4d2"><div class="bar-fill" style="width:65.4%;background:var(--grey)"></div></div>
+        </div>
+        <p style="margin-top:9px;font-size:11px;color:#0d7040;line-height:1.52;border-top:1px solid #a4d9ba;padding-top:7px">Neural net <strong>pulls ahead</strong> once it has enough data.</p>
+      </div>
+
+    </div>
+
+    <div class="note" style="margin-top:10px;font-size:12px">
+      <strong>Honest:</strong> XGBoost's hourly <span class="fig">0.738</span> is still the single best score overall. The gap narrowed, it didn't vanish. Part of XGBoost's 5-min drop is that its hand-built features were tuned for hourly bars. Compare within a timeframe, not across.
+    </div>
+
+  </div>
+</section>
+
+<!-- =========================================================
+     7 - FULL RESULTS + CONFUSION MATRIX
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">07</div>
+    <div class="slide-header">
+      <div class="kicker">Results in detail &middot; XGBoost hourly test set</div>
+    </div>
+    <h2 style="margin-bottom:12px;padding-right:104px">Never confuses bull vs. bear, only whether a gap exists.</h2>
+
+    <div class="row" style="align-items:flex-start;gap:22px">
+
+      <!-- Left: confusion matrix -->
+      <div style="flex:1 1 290px;min-width:270px;max-width:340px">
+        <p style="font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Confusion matrix (rows = true, cols = predicted)</p>
+
+        <svg viewBox="0 0 330 316" width="100%" style="display:block" aria-label="3x3 confusion matrix heatmap">
+
+          <text x="183" y="16" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--muted)" font-style="italic" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif">PREDICTED</text>
+
+          <text x="106" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="var(--muted)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">none</text>
+          <text x="192" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bull)"  font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">bull</text>
+          <text x="272" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bear)"  font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">bear</text>
+
+          <text x="10" y="182" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--muted)" font-style="italic" transform="rotate(-90,10,182)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif">TRUE</text>
+
+          <text x="36" y="92"  text-anchor="middle" font-size="11" font-weight="700" fill="var(--muted)" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">none</text>
+          <text x="36" y="182" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bull)"  font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">bull</text>
+          <text x="36" y="272" text-anchor="middle" font-size="11" font-weight="700" fill="var(--bear)"  font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">bear</text>
+
+          <!-- ROW 0 -->
+          <rect x="56" y="46" width="95" height="82" rx="5" fill="#0f8a4e" opacity=".76"/>
+          <text x="103" y="88"  text-anchor="middle" font-size="18" font-weight="700" fill="white" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">4888</text>
+          <text x="103" y="106" text-anchor="middle" font-size="10" fill="white" opacity=".85" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">97.1%</text>
+
+          <rect x="155" y="46" width="70" height="82" rx="5" fill="#d63030" opacity=".09"/>
+          <text x="190" y="88"  text-anchor="middle" font-size="18" font-weight="700" fill="var(--bear)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">77</text>
+          <text x="190" y="106" text-anchor="middle" font-size="10" fill="var(--bear)" opacity=".7" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">1.5%</text>
+
+          <rect x="229" y="46" width="70" height="82" rx="5" fill="#d63030" opacity=".09"/>
+          <text x="264" y="88"  text-anchor="middle" font-size="18" font-weight="700" fill="var(--bear)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">70</text>
+          <text x="264" y="106" text-anchor="middle" font-size="10" fill="var(--bear)" opacity=".7" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">1.4%</text>
+
+          <!-- ROW 1 -->
+          <rect x="56"  y="132" width="95" height="82" rx="5" fill="#d63030" opacity=".12"/>
+          <text x="103" y="174" text-anchor="middle" font-size="18" font-weight="700" fill="var(--bear)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">17</text>
+          <text x="103" y="192" text-anchor="middle" font-size="10" fill="var(--bear)" opacity=".7" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">17.7%</text>
+
+          <rect x="155" y="132" width="70" height="82" rx="5" fill="#0f8a4e" opacity=".70"/>
+          <text x="190" y="174" text-anchor="middle" font-size="18" font-weight="700" fill="white" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">79</text>
+          <text x="190" y="192" text-anchor="middle" font-size="10" fill="white" opacity=".85" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">82.3%</text>
+
+          <rect x="229" y="132" width="70" height="82" rx="5" fill="var(--line)" opacity=".5"/>
+          <text x="264" y="174" text-anchor="middle" font-size="18" font-weight="700" fill="var(--grey)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">0</text>
+          <text x="264" y="192" text-anchor="middle" font-size="10" fill="var(--grey)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">0%</text>
+
+          <!-- ROW 2 -->
+          <rect x="56"  y="218" width="95" height="82" rx="5" fill="#d63030" opacity=".09"/>
+          <text x="103" y="260" text-anchor="middle" font-size="18" font-weight="700" fill="var(--bear)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">8</text>
+          <text x="103" y="278" text-anchor="middle" font-size="10" fill="var(--bear)" opacity=".7" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">11.9%</text>
+
+          <rect x="155" y="218" width="70" height="82" rx="5" fill="var(--line)" opacity=".5"/>
+          <text x="190" y="260" text-anchor="middle" font-size="18" font-weight="700" fill="var(--grey)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">0</text>
+          <text x="190" y="278" text-anchor="middle" font-size="10" fill="var(--grey)" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">0%</text>
+
+          <rect x="229" y="218" width="70" height="82" rx="5" fill="#0f8a4e" opacity=".67"/>
+          <text x="264" y="260" text-anchor="middle" font-size="18" font-weight="700" fill="white" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">59</text>
+          <text x="264" y="278" text-anchor="middle" font-size="10" fill="white" opacity=".85" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif" font-variant-numeric="tabular-nums">88.1%</text>
+
+          <!-- Captions -->
+          <text x="103" y="308" text-anchor="middle" font-size="9" fill="var(--bull)" font-style="italic" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif">diagonal = correct</text>
+          <text x="230" y="308" text-anchor="middle" font-size="9" fill="var(--bear)" font-style="italic" font-family="Georgia,'Iowan Old Style',Palatino Linotype,Palatino,serif">off-diagonal = wrong</text>
+
+        </svg>
+        <p class="caption" style="margin-top:3px">Cell shading = per-row normalised. Per-class F1: none <span class="fig">0.98</span> &middot; bull <span class="fig">0.63</span> &middot; bear <span class="fig">0.60</span>.</p>
+      </div>
+
+      <!-- Right: 5-model bars + insight -->
+      <div style="flex:1 1 220px;display:flex;flex-direction:column;gap:11px">
+        <p style="font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">All 5 models &middot; hourly multi-symbol (macro-F1)</p>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div class="bar-row" style="margin-bottom:0">
+            <div class="bar-meta"><span class="bar-label" style="color:var(--accent)">XGBoost</span><span class="bar-val fig" style="color:var(--accent)">0.738</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:73.8%;background:var(--accent)"></div></div>
+          </div>
+          <div class="bar-row" style="margin-bottom:0">
+            <div class="bar-meta"><span class="bar-label" style="color:var(--bull)">CNN-LSTM</span><span class="bar-val fig" style="color:var(--bull)">0.675</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:67.5%;background:var(--bull)"></div></div>
+          </div>
+          <div class="bar-row" style="margin-bottom:0">
+            <div class="bar-meta"><span class="bar-label" style="color:var(--ink)">LSTM</span><span class="bar-val fig" style="color:var(--ink)">0.640</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:64%;background:#6a6a7a"></div></div>
+          </div>
+          <div class="bar-row" style="margin-bottom:0">
+            <div class="bar-meta"><span class="bar-label" style="color:var(--muted)">Transformer</span><span class="bar-val fig" style="color:var(--muted)">0.577</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:57.7%;background:var(--grey)"></div></div>
+          </div>
+          <div class="bar-row" style="margin-bottom:0">
+            <div class="bar-meta"><span class="bar-label" style="color:var(--muted2)">xLSTM</span><span class="bar-val fig" style="color:var(--muted2)">0.369</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:36.9%;background:#d0d0da"></div></div>
+          </div>
+        </div>
+
+        <div class="dual-strip" style="background:var(--bull-soft);border-radius:0 8px 8px 0;padding:11px 13px 11px 14px">
+          <p style="font-size:12.5px;font-weight:750;color:var(--bull);margin-bottom:4px">Key insight from the matrix</p>
+          <p style="font-size:12px;color:#0d7040;line-height:1.52">The model <strong>never</strong> mistakes a bullish gap for a bearish one. Both cross-class cells are exactly <span class="fig">0</span>. Errors are only about whether a gap exists at all, not which kind.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     8 - VALIDATION
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">08</div>
+    <div class="slide-header">
+      <div class="kicker">Why you can trust the numbers</div>
+    </div>
+    <h2>Reproducible, not cherry-picked.</h2>
+
+    <div class="statgrid">
+      <div class="statcard">
+        <div class="sico">
+          <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <circle cx="14" cy="14" r="11" stroke="var(--accent)" stroke-width="1.5"/>
+            <circle cx="14" cy="14" r="4.5" fill="var(--accent)" opacity=".2"/>
+            <circle cx="14" cy="14" r="2" fill="var(--accent)"/>
+          </svg>
+        </div>
+        <div class="sv fig">5<span style="font-size:.52em;font-weight:600">x</span></div>
+        <div class="sk">seeds per model. Report the spread, not a lucky run.</div>
+      </div>
+      <div class="statcard">
+        <div class="sico">
+          <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <line x1="3" y1="14.5" x2="25" y2="14.5" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/>
+            <line x1="6" y1="9" x2="6" y2="20" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="22" y1="9" x2="22" y2="20" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="sv fig">95<span style="font-size:.52em;font-weight:600">%</span></div>
+        <div class="sk">confidence intervals on every reported score.</div>
+      </div>
+      <div class="statcard">
+        <div class="sico">
+          <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <rect x="4" y="4" width="20" height="20" rx="5" stroke="var(--accent)" stroke-width="1.5"/>
+            <path d="M9 14l3.5 3.5L19 10" stroke="var(--bull)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="sv fig">1000<span style="font-size:.52em;font-weight:600">+</span></div>
+        <div class="sk">automated tests, including mandatory leak checks.</div>
+      </div>
+      <div class="statcard">
+        <div class="sico">
+          <svg width="24" height="24" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <rect x="6" y="13" width="16" height="11" rx="4" stroke="var(--accent)" stroke-width="1.5"/>
+            <path d="M10 13V10a4 4 0 0 1 8 0v3" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="14" cy="19" r="2" fill="var(--bull)"/>
+          </svg>
+        </div>
+        <div class="sv fig">0</div>
+        <div class="sk">future leaks. Enforced by a pytest fixture on every run.</div>
+      </div>
+    </div>
+
+    <p class="muted" style="margin-top:24px;font-size:clamp(15px,1.6vw,19px);font-style:italic;font-family:var(--serif)">A number is only worth as much as the way you got it.</p>
+  </div>
+</section>
+
+<!-- =========================================================
+     9 - GOOD / BAD / UGLY
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">09</div>
+    <div class="slide-header">
+      <div class="kicker">Honest about limits</div>
+    </div>
+    <h2 style="margin-bottom:18px">Good, bad, and ugly.</h2>
+
+    <div class="gbu" style="align-items:stretch">
+
+      <div class="card good" style="display:flex;flex-direction:column;gap:0">
+        <div class="verdict-badge"><span class="verdict-dot"></span>Good</div>
+        <p>Detects the pattern reliably. The science is solid: rigorous split, real leak caught, reproducible across 5 seeds and 5 models.</p>
+        <div style="margin-top:auto;padding-top:11px;border-top:1px solid var(--line)">
+          <p class="verdict-line">Strong detector. Real results.</p>
+        </div>
+      </div>
+
+      <div class="card bad" style="display:flex;flex-direction:column;gap:0">
+        <div class="verdict-badge"><span class="verdict-dot"></span>Bad</div>
+        <p>As a money-making signal the edge is thin. With realistic trading costs, <strong>almost everything lost money.</strong></p>
+        <div style="margin-top:auto;padding-top:11px;border-top:1px solid var(--line)">
+          <p class="verdict-line">Detection is not profit.</p>
+        </div>
+      </div>
+
+      <div class="card ugly" style="display:flex;flex-direction:column;gap:0">
+        <div class="verdict-badge"><span class="verdict-dot"></span>Ugly</div>
+        <p>Only <strong>one</strong> setup came out positive: 15-minute SPY, fixed 2R exit. Doesn't generalise to other stocks or timeframes.</p>
+        <div style="margin-top:auto;padding-top:11px;border-top:1px solid var(--line)">
+          <p class="verdict-line">One setup. Not a strategy.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:18px;padding:13px 17px;background:var(--accent-soft);border-radius:9px;border-left:3px solid var(--accent)">
+      <p style="font-size:clamp(13.5px,1.4vw,16.5px);line-height:1.58;color:var(--ink)">A strong <strong style="color:var(--accent)">detector</strong> and an honest <strong style="color:var(--accent)">study</strong>: not a get-rich strategy, and I won't pretend it is.</p>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     10 - DEMO
+========================================================= -->
+<section class="slide">
+  <div class="wrap" style="text-align:center">
+    <div class="slide-num">10</div>
+    <div class="slide-header" style="justify-content:center">
+      <div class="kicker">The product &middot; more than a notebook</div>
+    </div>
+    <h2 style="margin-bottom:26px">Watch the models detect gaps, live.</h2>
+
+    <a href="../../reports/demo/fvg_animation.html" target="_blank" rel="noopener" class="demo-cta">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.45)" stroke-width="1.5"/>
+        <path d="M9.5 8.5l7 3.5-7 3.5V8.5z" fill="white"/>
+      </svg>
+      Open live demo
+    </a>
+
+    <p class="demo-caption" style="margin:18px auto 0">
+      Bars arrive one at a time. Each model draws its detected gaps on the chart. Gaps that price respected are marked with a check, failed ones with an X. Use the scene picker to jump between successful detections, failures, and mixed cases.
+    </p>
+
+    <div style="margin-top:22px;display:flex;justify-content:center;gap:22px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.5" stroke="var(--muted)" stroke-width="1.5"/>
+          <line x1="8" y1="5.5" x2="8" y2="8.5" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="8" cy="10.5" r=".7" fill="var(--muted)"/>
+        </svg>
+        Inspection overlay tool
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <rect x="2" y="3.5" width="12" height="9" rx="2" stroke="var(--muted)" stroke-width="1.5"/>
+          <line x1="8" y1="3.5" x2="8" y2="1.5" stroke="var(--muted)" stroke-width="1.5"/>
+          <line x1="5.5" y1="1.5" x2="10.5" y2="1.5" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Live paper-trading harness
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 12l4-5 3 3.5 2.5-4.5L15 10" stroke="var(--bull)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Scene picker: success / failure / mixed
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     11 - TAKEAWAY
+========================================================= -->
+<section class="slide">
+  <div class="wrap">
+    <div class="slide-num">11</div>
+    <div class="slide-header">
+      <div class="kicker">What I learned &middot; what's next</div>
+    </div>
+    <h2>More data beats a fancier model.</h2>
+    <ul class="clean">
+      <li>For a rare pattern, <strong>data beats model</strong> almost every time.</li>
+      <li><strong>Rigor</strong> like catching that leak separates a real result from a nice-looking one.</li>
+      <li>Next: more data still, the other SMC patterns, a live forward-test.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- =========================================================
+     12 - THANK YOU
+========================================================= -->
+<section class="slide">
+  <div class="wrap" style="text-align:center">
+    <div class="slide-num" style="right:0;left:0;text-align:center;font-size:clamp(90px,13vw,160px);color:#eaeaf4;top:-20px">12</div>
+    <div class="slide-header" style="justify-content:center">
+      <div class="kicker">Thanks for watching</div>
+    </div>
+    <h1 class="anim-in" style="font-size:clamp(48px,9vw,108px);letter-spacing:-.03em;margin-bottom:0">Thank you.</h1>
+    <p class="sub anim-in-2" style="margin:18px auto 0;max-width:36ch">More data beats a fancier model, and rigor is what makes it real. Happy to take questions.</p>
+
+    <!-- GitHub link -->
+    <a href="https://github.com/nixxxo/smc-data-challenge" target="_blank" rel="noopener" class="anim-in-3"
+       style="display:inline-flex;align-items:center;gap:11px;margin-top:38px;padding:12px 21px;background:var(--ink);color:#fff;border-radius:9px;text-decoration:none;font-size:13.5px;font-weight:650;letter-spacing:.01em;box-shadow:0 3px 16px rgba(18,18,30,.16)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.01-.02-1.99-3.2.69-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56C20.71 21.38 24 17.07 24 12 24 5.73 18.27.5 12 .5z"/></svg>
+      github.com/nixxxo/smc-data-challenge
+    </a>
+
+    <p class="muted anim-in-3" style="margin-top:28px;font-size:12.5px">Nikola Baburov &middot; AI-Advanced &middot; Data-Driven Innovation Challenge</p>
+  </div>
+</section>
+
+<!-- =========================================================
+     FOOTER + HINT
+========================================================= -->
+<footer>
+  <span class="title" id="ftitle">SMC Fair Value Gap Detection</span>
+  <span class="fig"><span id="cur">1</span> / <span id="tot"></span></span>
+</footer>
+<div class="hint">&larr; &rarr; or click to navigate &middot; <kbd>F</kbd> fullscreen</div>
+
+<script>
+  // ── Rarity grid (slide 4) ─────────────────────────────────────────────────
+  (function(){
+    var svg = document.getElementById('raritygrid');
+    if(!svg) return;
+    var cols=40, rows=25, cw=8.2, ch=8.2, gx=1.0, gy=1.0;
+    var bullIndices = [
+      14, 57, 103, 128, 171, 209, 247, 283, 319, 356,
+      401, 438, 462, 511, 549, 603, 651, 712
+    ];
+    var bearIndices = [
+      38, 76, 142, 198, 231, 274, 337, 387, 453, 517,
+      568, 624, 687
+    ];
+    var bullSet = new Set(bullIndices);
+    var bearSet = new Set(bearIndices);
+    var ns = 'http://www.w3.org/2000/svg';
+    svg.setAttribute('viewBox', '0 0 ' + (cols*(cw+gx)) + ' ' + (rows*(ch+gy)));
+    var frag = document.createDocumentFragment();
+    for(var r = 0; r < rows; r++){
+      for(var c = 0; c < cols; c++){
+        var idx = r * cols + c;
+        var x = c * (cw + gx);
+        var y = r * (ch + gy);
+        var rect = document.createElementNS(ns, 'rect');
+        rect.setAttribute('x', x.toFixed(1));
+        rect.setAttribute('y', y.toFixed(1));
+        rect.setAttribute('width', cw);
+        rect.setAttribute('height', ch);
+        rect.setAttribute('rx', '1.5');
+        if(bullSet.has(idx)){
+          rect.setAttribute('fill', '#0f8a4e');
+        } else if(bearSet.has(idx)){
+          rect.setAttribute('fill', '#d63030');
+        } else {
+          rect.setAttribute('fill', '#e4e4ee');
+        }
+        frag.appendChild(rect);
+      }
+    }
+    svg.appendChild(frag);
+  })();
+
+  // ── Slide navigation ──────────────────────────────────────────────────────
+  var slides = [...document.querySelectorAll('.slide')];
+  var titles = [
+    "Title",
+    "The hook",
+    "Think Big",
+    "The MVP",
+    "The data",
+    "Five models",
+    "The surprise",
+    "Results and confusion",
+    "Validation",
+    "Good, bad, and ugly",
+    "Live demo",
+    "Takeaway",
+    "Thank you"
+  ];
+  var i = 0;
+  var bar    = document.getElementById('bar');
+  var curEl  = document.getElementById('cur');
+  var totEl  = document.getElementById('tot');
+  var ftitle = document.getElementById('ftitle');
+  totEl.textContent = slides.length;
+
+  function show(n){
+    i = Math.max(0, Math.min(n, slides.length - 1));
+    slides.forEach(function(s, k){ s.classList.toggle('active', k === i); });
+    bar.style.width = (i / (slides.length - 1) * 100) + '%';
+    curEl.textContent = i + 1;
+    ftitle.textContent = titles[i] || '';
+  }
+
+  function next(){ show(i + 1); }
+  function prev(){ show(i - 1); }
+
+  document.addEventListener('keydown', function(e){
+    if(['ArrowRight','ArrowDown',' ','PageDown'].indexOf(e.key) > -1){ e.preventDefault(); next(); }
+    else if(['ArrowLeft','ArrowUp','PageUp'].indexOf(e.key) > -1){ e.preventDefault(); prev(); }
+    else if(e.key === 'Home'){ show(0); }
+    else if(e.key === 'End'){ show(slides.length - 1); }
+    else if(e.key === 'f' || e.key === 'F'){
+      if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  document.addEventListener('click', function(e){
+    if(e.target.closest('a')) return;
+    var x = e.clientX / window.innerWidth;
+    x < 0.28 ? prev() : next();
+  });
+
+  show(0);
+</script>
+</body>
+</html>
