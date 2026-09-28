@@ -198,7 +198,6 @@ smc-data-challenge/
     ├── models.md                  # per-model cards + current benchmark results
     ├── evaluation.md              # fairness, leakage guards, CIs, validation sprint
     ├── trading-simulation.md      # trade-sim methodology + realism findings
-    └── assignment.md              # course brief + deadlines
 ```
 
 ## High-level component map

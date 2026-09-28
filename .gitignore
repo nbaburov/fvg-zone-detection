@@ -1,14 +1,14 @@
 # .gitignore : what this repo does NOT commit.
 #
-# Tracked on purpose: source, configs, docs, notebooks, the .nb/ provenance
-# trail, CLAUDE.md, the FROZEN model inputs (data/processed/), trained
-# checkpoints/, the gold label set, and a curated reports/ record. Everything
+# Tracked on purpose: source, configs, docs, notebooks, trained checkpoints/,
+# the gold label set, and a curated reports/ record. Market data is never
+# committed (Alpaca terms): rebuild it with the data pipeline. Everything
 # regenerable-and-heavy or purely runtime is ignored.
 
-# --- Override a global gitignore (track these despite any global rule) ---
-!CLAUDE.md
-!.nb/
-!.nb/**
+# --- Market data and local notes ---
+data/processed/
+.nb/
+CLAUDE.md
 
 # --- Python ---
 __pycache__/
@@ -43,7 +43,7 @@ data/processed/test_predictions*.npz
 # --- reports/ : runtime output, ignored except a curated summaries-only record ---
 # Allowlist the canonical dirs below; bloat (html/npz/parquet/plots) is never
 # tracked. Add a new canonical dir with one `!` line.
-# See CONTRIBUTING.md and tests/rigor/test_reports_layout.py.
+# See docs/development.md and tests/rigor/test_reports_layout.py.
 reports/*
 !reports/rigor/
 !reports/inspect/

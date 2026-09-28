@@ -1,8 +1,6 @@
-# Contributing
+# Development guide
 
-Thanks for your interest in the SMC FVG detector. This guide covers local setup, the test gates, and the project conventions that keep results trustworthy and reproducible.
-
-This is an individual academic project under a noncommercial license (see [`LICENSE`](LICENSE)). External contributions are welcome for noncommercial purposes; for anything commercial, contact the author first.
+Setup, the test gate, the constraints the results depend on, and naming conventions.
 
 ## Setup
 
@@ -23,7 +21,7 @@ python -c "from src.data.pipeline import build_pipeline; build_pipeline()"
 
 ## Tests (the gate)
 
-Every change must keep the suite green.
+The suite should stay green.
 
 ```bash
 make test                    # full suite. XGBoost tests run isolated (see below)
@@ -38,8 +36,7 @@ When you fix a bug, add a regression test in the matching `tests/` subdirectory
 
 ## Critical constraints (do not break these)
 
-These are enforced by tests and are the reason the results hold up. A change that
-violates one will be rejected.
+These are enforced by tests and are the reason the results hold up. 
 
 - **Temporal split only.** Never shuffle the time series. Train 2016 to 2021, validate 2022, test 2023 to 2025. Boundaries live in `src/data/split.py`.
 - **No lookahead.** Labels use only information available at the candle's time. The FVG label index is N+2 (the pattern closes on bar N+1, so it is knowable then, never at N). A mandatory pytest fixture asserts this across timeframes.
@@ -59,28 +56,6 @@ Keep on-disk artifacts on the flat, explicit scheme so the repo stays navigable.
 
 When generating an inspection run, pass `--label <name>` so the output directory is
 self-documenting (`<name>_<timestamp>`) instead of a bare timestamp.
-
-## Branches and commits
-
-- Branch off `master`. Do not commit directly to `master`.
-- Use Conventional Commits: `type(scope): summary` (for example
-  `feat(data): multi-symbol pipeline`, `docs: refresh model card`, `fix(strategy):
-  ATR stop guard`). Types in use: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`.
-- Keep commits focused. One logical change per commit.
-
-## Pull requests
-
-1. Branch, implement, and keep `make test` green.
-2. Update the relevant docs in `docs/` when behaviour or structure changes.
-3. Open a PR against `master` with a clear description of what changed and why.
-4. Note any change to the critical constraints above explicitly; reviewers check
-   these first.
-
-## Reporting bugs and suggesting features
-
-Open an issue. For a bug, include the command you ran, the expected versus actual
-behaviour, and the full error output. For a feature, describe the use case and how
-it fits the project's scope (FVG detection and evaluation, not price prediction).
 
 ## Hardware notes
 
