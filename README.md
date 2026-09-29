@@ -37,7 +37,7 @@ A trading simulation checks whether acting on the signals would have made money 
 Requires Python 3.12 and a free [Alpaca](https://alpaca.markets) paper account for market data. Market data is not included in this repository; the pipeline downloads and labels it.
 
 ```bash
-git clone https://github.com/nixxxo/fvg-zone-detection.git
+git clone https://github.com/nbaburov/fvg-zone-detection.git
 cd fvg-zone-detection
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
