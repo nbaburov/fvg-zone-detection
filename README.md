@@ -89,4 +89,4 @@ Nikola Baburov.
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE): free for any noncommercial use with attribution. Commercial use needs a separate license from the author.
+[PolyForm Noncommercial 1.0.0](LICENSE): free for any noncommercial use with attribution. Commercial use needs a separate paid license; contact [NB Limited](https://nb-limited.com).
