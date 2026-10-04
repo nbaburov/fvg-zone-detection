@@ -6,6 +6,8 @@ Finds Fair Value Gap (FVG) zones on stock candles and labels each with a confide
 
 Individual project, Fontys University of Applied Sciences (Data Science & AI, 2026).
 
+Write-up: [Teaching a machine to see Fair Value Gaps](https://nb.nb-limited.com/writing/fvg-zone-detection).
+
 > Shared as a reference. Not actively maintained for external contributions.
 
 ## What it does
