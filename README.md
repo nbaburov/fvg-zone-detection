@@ -14,6 +14,8 @@ Five architectures detect FVG zones on SPY hourly, 15-minute and 5-minute candle
 
 **Headline finding:** the task is data-bound, not model-bound. Gradient boosting wins on the small single-ticker set, and the neural networks improve when four tickers (SPY, QQQ, IWM, DIA) are pooled. The chosen detector is the CNN-LSTM, F1 0.675 [0.637, 0.710] on unseen 2023 to 2025 data; XGBoost, the control, reaches 0.738 [0.689, 0.779].
 
+*Revised in October 2026: the limit is the 60-candle window, not the data. See the [evaluation note](#evaluation-note-october-2026).*
+
 Why the numbers hold up:
 
 - **No lookahead.** Time-ordered split (train 2016 to 2021, validate 2022, test 2023 to 2025), never shuffled; labels use only information available at the candle's time. Enforced by a test.
