@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,30 +14,5 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-          cache: pip
-      # CPU-only PyTorch wheels: the CUDA build is gigabytes and nothing here needs a GPU.
-      - run: pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-      # Data-dependent tests skip: market data is not committed and CI has no Alpaca keys.
-      - run: python -m pytest -q
-      # XGBoost runs in its own process, as in the Makefile.
-      - run: python -m pytest -q tests/models/test_xgboost_baseline.py
-
-  secrets:
-    name: Secret scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  showcase:
+    uses: nbaburov/.github/.github/workflows/showcase.yml@main
